@@ -189,3 +189,20 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# MLflow
+/mlruns/
+
+# Modelos entrenados y artefactos generados
+/models/*
+!/models/.gitkeep
+
+
+# Entornos virtuales
+.venv/
+.venv-test/
+venv/
+
+# Archivos de respaldo
+*.bak
+requirements_backup.txt
