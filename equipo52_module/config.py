@@ -46,6 +46,8 @@ ESTACIONES_EXCLUIDAS = [22, 97, 99, 109, 113, 114, 116, 138, 147, 149, 223, 240,
 
 # MLflow
 MLFLOW_EXPERIMENT = "mibici-equipo52"
+# Registro local en la raíz del proyecto; mlflow.db y mlartifacts/ están excluidos de Git.
+MLFLOW_TRACKING_URI = f"sqlite:///{PROJ_ROOT / 'mlflow.db'}"
 SEED = 42
 
 # If tqdm is installed, configure loguru with tqdm.write
