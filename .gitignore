@@ -192,6 +192,8 @@ cython_debug/
 
 # MLflow
 /mlruns/
+/mlartifacts/
+mlflow.db
 
 # Modelos entrenados y artefactos generados
 /models/*
