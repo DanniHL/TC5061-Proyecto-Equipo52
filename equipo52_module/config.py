@@ -24,9 +24,13 @@ FIGURES_DIR = REPORTS_DIR / "figures"
 # Acuerdos del Equipo 52 sobre los datos de MiBici
 # Se usan en los notebooks y scripts de las tres preguntas para trabajar con los mismos datos.
 
-# Datos descargados de https://mibici.net/es/datos-abiertos/ (no se suben a GitHub).
+# Página de datos abiertos de MiBici. Los archivos descargados no se suben a GitHub.
+URL_DATOS_ABIERTOS = "https://mibici.net/es/datos-abiertos/"
 VERSION_DATOS = "2026-09"
 NOMENCLATURA_FILE = RAW_DATA_DIR / "nomenclatura_2026_09.csv"
+VIAJES_FILE = INTERIM_DATA_DIR / "viajes.parquet"
+# El manifiesto sí se guarda en Git: permite comprobar que todos usan los mismos archivos.
+MANIFIESTO_FILE = PROJ_ROOT / "references" / "manifiesto_datos.csv"
 
 # Periodo de análisis: historia completa publicada por MiBici.
 FECHA_INICIO = "2014-12-01"

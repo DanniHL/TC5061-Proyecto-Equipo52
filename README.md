@@ -35,7 +35,7 @@ Además de su pregunta: Daniela Hernández administra el repositorio y Roberto R
 Están escritos en `equipo52_module/config.py` para que las tres preguntas usen los mismos valores.
 
 - **Periodo:** historia completa, del 1 de diciembre de 2014 al 30 de septiembre de 2026 (`FECHA_INICIO`, `FECHA_FIN`). Versión de datos `2026-09`.
-- **Estaciones excluidas:** las 14 dadas de baja, con prefijo "ex-" en la nomenclatura, 4 de ellas con capacidad 0 (`ESTACIONES_EXCLUIDAS`). Las estaciones 124, 405 y 407 tienen viajes pero no aparecen en la nomenclatura, así que quedan fuera al unir con ella.
+- **Estaciones excluidas:** las 14 dadas de baja, con prefijo "ex-" en la nomenclatura, 4 de ellas con capacidad 0 (`ESTACIONES_EXCLUIDAS`). La ingesta no las quita, para que el Parquet sea copia fiel de lo publicado; cada pregunta las quita al preparar sus datos. Las estaciones 124, 405 y 407 tienen viajes pero no aparecen en la nomenclatura, así que quedan fuera al unir con ella.
 - **Estaciones nuevas:** las 100 estaciones abiertas entre mayo y agosto de 2026 se incluyen en la evaluación.
 - **MLflow:** experimento `mibici-equipo52`, semilla `42`.
 
@@ -65,9 +65,21 @@ En Windows, la activación es `.venv\Scripts\activate`.
 
 ## Ingesta y experimento base
 
-`dataset.py` descarga de MiBici los 142 archivos mensuales y la nomenclatura en `data/raw/`; unifica encabezados, codificación y formatos de fecha; deja fuera las columnas personales; y guarda el resultado en formato Parquet. También genera un manifiesto con el número de registros y la huella digital (hash) de cada archivo. El manifiesto sí se guarda en Git para comprobar que los tres integrantes usan los mismos datos.
+Con el entorno activado, desde la carpeta del proyecto:
 
-Pendiente: los comandos para ejecutar la ingesta, los entrenamientos de cada pregunta y la vista de experimentos en MLflow se agregan cuando esos scripts se unan a `main`.
+```bash
+python equipo52_module/dataset.py
+```
+
+El comando:
+1. Busca en la página de datos abiertos las ligas de los archivos del periodo de análisis (142 meses y la nomenclatura).
+2. Descarga a `data/raw/` solo los que falten. La primera vez son unos 3.1 GB.
+3. Lee de cada mes solo las columnas de `COLUMNAS_VIAJES`, resuelve las dos codificaciones y los dos formatos de fecha que usa MiBici, y guarda todos los viajes en `data/interim/viajes.parquet`. Si encuentra una fecha con un formato nuevo, se detiene y avisa.
+4. Escribe `references/manifiesto_datos.csv` con el número de registros, la huella SHA-256 y la liga de cada archivo. El manifiesto sí se guarda en Git: si otra persona corre la ingesta, sus huellas deben coincidir.
+
+Resultado esperado: 142 meses y 39,078,840 viajes.
+
+Pendiente: los comandos de entrenamiento de cada pregunta y la vista de experimentos en MLflow se agregan cuando esos scripts se unan a `main`.
 
 ## Forma de trabajo en Git
 
