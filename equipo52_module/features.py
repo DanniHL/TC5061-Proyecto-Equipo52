@@ -17,6 +17,17 @@ NOMBRES_CLASES = {NORMAL: "normal", SIN_BICICLETAS: "sin_bicicletas", SIN_ANCLAJ
 HORAS_POR_SEMANA = 24 * 7
 
 
+def quitar_viajes_cortos(viajes: pd.DataFrame, segundos_minimos: int) -> pd.DataFrame:
+    """Quita los viajes que duran menos de 'segundos_minimos' (acuerdo del equipo: 1 minuto).
+
+    No son viajes reales: la mayoría sale y regresa a la misma estación porque la bicicleta se
+    devuelve de inmediato. En P2 casi no cambian el desbalance, pero se quitan para que las tres
+    preguntas usen los mismos viajes.
+    """
+    duracion = (viajes["Fin_del_viaje"] - viajes["Inicio_del_viaje"]).dt.total_seconds()
+    return viajes[duracion >= segundos_minimos]
+
+
 def contar_movimientos_por_hora(viajes: pd.DataFrame) -> pd.DataFrame:
     """Cuenta las bicicletas que salen y llegan a cada estación en cada hora.
 

@@ -28,6 +28,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precisio
 import typer
 
 from equipo52_module.config import (
+    DURACION_MINIMA_SEGUNDOS,
     ESTACIONES_EXCLUIDAS,
     FECHA_FIN,
     FECHA_INICIO,
@@ -46,6 +47,7 @@ from equipo52_module.features import (
     SIN_ANCLAJES,
     SIN_BICICLETAS,
     construir_tabla_p2,
+    quitar_viajes_cortos,
 )
 
 app = typer.Typer()
@@ -169,6 +171,7 @@ def main(modelo: str = typer.Option("hgb", help="base o hgb"),
     logger.info(f"P2 · modelo {modelo} · entrenamiento desde {inicio_entrenamiento} · prueba desde {INICIO_PRUEBA}")
 
     viajes = pd.read_parquet(VIAJES_FILE)
+    viajes = quitar_viajes_cortos(viajes, DURACION_MINIMA_SEGUNDOS)
     estaciones = cargar_estaciones(NOMENCLATURA_FILE, ESTACIONES_EXCLUIDAS)
     tabla = construir_tabla_p2(viajes, estaciones, HORAS_ANTICIPACION, UMBRAL_FALLA, SEMANAS_HISTORIAL)
     del viajes
@@ -182,6 +185,7 @@ def main(modelo: str = typer.Option("hgb", help="base o hgb"),
         "huella_manifiesto": huella_manifiesto(MANIFIESTO_FILE), "semilla": SEED,
         "horas_anticipacion": HORAS_ANTICIPACION, "umbral_falla": round(UMBRAL_FALLA, 4),
         "semanas_historial": SEMANAS_HISTORIAL, "estaciones_excluidas": len(ESTACIONES_EXCLUIDAS),
+        "duracion_minima_segundos": DURACION_MINIMA_SEGUNDOS,
         "filas_entrenamiento": len(entrenamiento), "filas_prueba": len(prueba),
     }
 
