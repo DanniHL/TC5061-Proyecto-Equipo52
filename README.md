@@ -77,7 +77,9 @@ El comando:
 3. Lee de cada mes solo las columnas de `COLUMNAS_VIAJES`, resuelve las dos codificaciones y los dos formatos de fecha que usa MiBici, y guarda todos los viajes en `data/interim/viajes.parquet`. Si encuentra una fecha con un formato nuevo, se detiene y avisa.
 4. Escribe `references/manifiesto_datos.csv` con el número de registros, la huella SHA-256 y la liga de cada archivo. El manifiesto sí se guarda en Git: si otra persona corre la ingesta, sus huellas deben coincidir.
 
-Resultado esperado: 142 meses y 39,078,840 viajes.
+Resultado esperado: 142 meses y 39,078,984 viajes.
+
+MiBici puede volver a publicar archivos ya existentes: en octubre de 2026 corrigió abril y mayo de 2023 (la hora de los viajes y 144 viajes más). Si tu manifiesto no coincide con el del repositorio, borra de `data/raw/` los archivos con huella distinta y vuelve a correr la ingesta.
 
 ### Experimento base de P2
 
