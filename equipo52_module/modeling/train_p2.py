@@ -1,6 +1,6 @@
 """P2 · Entrenamiento y registro en MLflow del modelo de riesgo por estación.
 
-Pregunta: ¿una estación estará en riesgo de quedarse sin bicicletas o sin anclajes libres en
+Pregunta: ¿Una estación estará en riesgo de quedarse sin bicicletas o sin anclajes libres en
 las próximas 3 horas? Cada corrida entrena con un periodo (historia completa o Post-Covid),
 evalúa con abril a septiembre de 2026 y registra parámetros, métricas y artefactos en MLflow.
 
