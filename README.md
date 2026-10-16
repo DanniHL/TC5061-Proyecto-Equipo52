@@ -1,61 +1,123 @@
-# Equipo52_Proyecto_MiBici
+# TC5061 · Proyecto MiBici · Equipo 52
 
 <a target="_blank" href="https://cookiecutter-data-science.drivendata.org/">
     <img src="https://img.shields.io/badge/CCDS-Project%20template-328F97?logo=cookiecutter" />
 </a>
 
-Actividad semana 5, proyecto MiBici
+Proyecto de la materia Operaciones de Aprendizaje Automático (TC5061, Maestría en Inteligencia Artificial Aplicada, Tecnológico de Monterrey). Usa los datos abiertos de viajes de MiBici, el sistema de bicicleta pública del Área Metropolitana de Guadalajara, para responder tres preguntas de operación y planeación con una base reproducible: mismos datos, mismo entorno y experimentos registrados en MLflow.
 
-## Project Organization
+## Preguntas e integrantes
+
+| # | Pregunta | Tipo de modelo | Responsable |
+|---|---|---|---|
+| P1 | ¿Cuántos viajes se iniciarán en una estación o zona en un periodo futuro? | Regresión | Daniela Hernández (DanniHL) |
+| P2 | ¿Una estación estará en riesgo de quedarse sin bicicletas o sin anclajes libres en un periodo futuro? | Clasificación | Roberto Robles (robrobles-droid) |
+| P3 | ¿Qué grupos de estaciones comparten patrones de uso y dónde están? | Agrupamiento | Joel Sánchez (PittJR1607) |
+
+Además de su pregunta: Daniela Hernández administra el repositorio y Roberto Robles prepara la ingesta de datos (`dataset.py`) y mantiene `config.py` y este README.
+
+## Datos
+
+**Fuente:** sección de datos abiertos de MiBici, https://mibici.net/es/datos-abiertos/. MiBici es operado por BKT Bici Pública S.A. de C.V. y administrado por la Agencia Metropolitana de Servicios de Infraestructura para la Movilidad del Área Metropolitana de Guadalajara.
+
+**Archivos usados:**
+- 142 archivos mensuales de viajes, de diciembre de 2014 a septiembre de 2026 (`datos_abiertos_AAAA_MM.csv`).
+- Nomenclatura de estaciones `nomenclatura_2026_09.csv`: número, nombre, latitud, longitud y capacidad de anclajes.
+
+**Uso de los datos:** la página invita a explorar, experimentar y compartir los datos de uso de MiBici, pero no publica una licencia explícita y su pie de página indica «Todos los derechos reservados Mi Bici © 2026». Por eso el equipo los usa solo con fines académicos, cita la fuente y no los vuelve a publicar: los archivos no se suben a GitHub y cada integrante los descarga directamente de MiBici.
+
+**Datos personales:** los archivos de viajes incluyen `Usuario_Id`, `Genero` y `Año_de_nacimiento`. No se necesitan para las preguntas del proyecto, así que no se leen: `config.py` define en `COLUMNAS_VIAJES` las únicas cinco columnas que se cargan.
+
+**Cómo se obtienen:** nadie los descarga a mano. Cada integrante ejecuta `dataset.py` en su computadora (ver «Ingesta y experimento base»). Toda la carpeta `data/` está excluida de Git.
+
+## Acuerdos de análisis
+
+Están escritos en `equipo52_module/config.py` para que las tres preguntas usen los mismos valores.
+
+- **Periodo:** historia completa, del 1 de diciembre de 2014 al 30 de septiembre de 2026 (`FECHA_INICIO`, `FECHA_FIN`). Versión de datos `2026-09`.
+- **Estaciones excluidas:** las 14 dadas de baja, con prefijo "ex-" en la nomenclatura, 4 de ellas con capacidad 0 (`ESTACIONES_EXCLUIDAS`). La ingesta no las quita, para que el Parquet sea copia fiel de lo publicado; cada pregunta las quita al preparar sus datos. Las estaciones 124, 405 y 407 tienen viajes pero no aparecen en la nomenclatura, así que quedan fuera al unir con ella.
+- **Estaciones nuevas:** las 100 estaciones abiertas entre mayo y agosto de 2026 se incluyen en la evaluación.
+- **MLflow:** experimento `mibici-equipo52`, semilla `42`.
+
+### Regla de riesgo de P2
+
+MiBici no publica cuántas bicicletas hay en cada estación, así que el riesgo se aproxima con los viajes y la capacidad. Cada hora se revisan las 3 horas siguientes. Hay falla probable:
+- **sin bicicletas**, si las salidas superan a las llegadas en un tercio de la capacidad de la estación o más;
+- **sin anclajes libres**, si las llegadas superan a las salidas en un tercio de la capacidad o más.
+
+La justificación está en los notebooks `1.0`, `1.1` y `1.2` de P2.
+
+**Corrida adicional de P2 (Post-Covid):** además del modelo con toda la historia, P2 entrena un segundo modelo solo con datos desde el 09/05/2023, fin de la emergencia sanitaria. Así se comprueba si entrenar con el comportamiento reciente de los usuarios permite anticipar mejor las estaciones en riesgo. Las dos corridas se registran en MLflow y se comparan con las mismas métricas. La evaluación de ambas incluye las 100 estaciones abiertas en 2026.
+
+## Instalación
+
+Requiere Python 3.12 y [uv](https://docs.astral.sh/uv/).
+
+```bash
+git clone https://github.com/DanniHL/TC5061-Proyecto-Equipo52.git
+cd TC5061-Proyecto-Equipo52
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install -r requirements.txt
+```
+
+En Windows, la activación es `.venv\Scripts\activate`.
+
+## Ingesta y experimento base
+
+Con el entorno activado, desde la carpeta del proyecto:
+
+```bash
+python equipo52_module/dataset.py
+```
+
+El comando:
+1. Busca en la página de datos abiertos las ligas de los archivos del periodo de análisis (142 meses y la nomenclatura).
+2. Descarga a `data/raw/` solo los que falten. La primera vez son unos 3.1 GB.
+3. Lee de cada mes solo las columnas de `COLUMNAS_VIAJES`, resuelve las dos codificaciones y los dos formatos de fecha que usa MiBici, y guarda todos los viajes en `data/interim/viajes.parquet`. Si encuentra una fecha con un formato nuevo, se detiene y avisa.
+4. Escribe `references/manifiesto_datos.csv` con el número de registros, la huella SHA-256 y la liga de cada archivo. El manifiesto sí se guarda en Git: si otra persona corre la ingesta, sus huellas deben coincidir.
+
+Resultado esperado: 142 meses y 39,078,840 viajes.
+
+Pendiente: los comandos de entrenamiento de cada pregunta y la vista de experimentos en MLflow se agregan cuando esos scripts se unan a `main`.
+
+## Forma de trabajo en Git
+
+- `main` está protegida: los cambios entran solo por Pull Request con al menos una aprobación de otra persona del equipo.
+- Una rama por tarea, con prefijo según el tipo de cambio: `feature/` (funcionalidad nueva), `fix/` (corrección), `docs/` (documentación).
+- Mensajes de commit con el formato Conventional Commits, por ejemplo `feat(p2): …`, `fix: …`, `docs: …`, `build: …`.
+- Los PR se unen con *merge commit* (sin *squash*) para conservar quién hizo cada commit.
+- Los notebooks se nombran `número-iniciales-descripción.ipynb`, por ejemplo `1.0-rr-p2-exploracion-datos.ipynb`.
+
+## Estructura del proyecto
 
 ```
-├── LICENSE            <- Open-source license if one is chosen
-├── Makefile           <- Makefile with convenience commands like `make data` or `make train`
-├── README.md          <- The top-level README for developers using this project.
-├── data
-│   ├── external       <- Data from third party sources.
-│   ├── interim        <- Intermediate data that has been transformed.
-│   ├── processed      <- The final, canonical data sets for modeling.
-│   └── raw            <- The original, immutable data dump.
+├── LICENSE            <- Licencia del código (MIT); no aplica a los datos de MiBici
+├── Makefile           <- Comandos de apoyo
+├── README.md          <- Este documento
+├── data               <- Datos del proyecto; toda la carpeta está excluida de Git
+│   ├── external       <- Datos de otras fuentes
+│   ├── interim        <- Datos intermedios ya transformados
+│   ├── processed      <- Datos finales para entrenar
+│   └── raw            <- Datos originales de MiBici, sin modificar
 │
-├── docs               <- A default mkdocs project; see www.mkdocs.org for details
+├── docs               <- Documentación del proyecto (mkdocs)
+├── models             <- Modelos entrenados
+├── notebooks          <- Notebooks de exploración: número, iniciales y descripción
+├── pyproject.toml     <- Datos del paquete equipo52_module y configuración de herramientas
+├── references         <- Diccionarios de datos, manuales y material de consulta
+├── reports
+│   └── figures        <- Gráficas generadas para los reportes
+├── requirements.txt   <- Paquetes con versión fija para reproducir el entorno
 │
-├── models             <- Trained and serialized models, model predictions, or model summaries
-│
-├── notebooks          <- Jupyter notebooks. Naming convention is a number (for ordering),
-│                         the creator's initials, and a short `-` delimited description, e.g.
-│                         `1.0-jqp-initial-data-exploration`.
-│
-├── pyproject.toml     <- Project configuration file with package metadata for 
-│                         equipo52_module and configuration for tools like black
-│
-├── references         <- Data dictionaries, manuals, and all other explanatory materials.
-│
-├── reports            <- Generated analysis as HTML, PDF, LaTeX, etc.
-│   └── figures        <- Generated graphics and figures to be used in reporting
-│
-├── requirements.txt   <- The requirements file for reproducing the analysis environment, e.g.
-│                         generated with `pip freeze > requirements.txt`
-│
-├── setup.cfg          <- Configuration file for flake8
-│
-└── equipo52_module   <- Source code for use in this project.
-    │
-    ├── __init__.py             <- Makes equipo52_module a Python module
-    │
-    ├── config.py               <- Store useful variables and configuration
-    │
-    ├── dataset.py              <- Scripts to download or generate data
-    │
-    ├── features.py             <- Code to create features for modeling
-    │
-    ├── modeling                
-    │   ├── __init__.py 
-    │   ├── predict.py          <- Code to run model inference with trained models          
-    │   └── train.py            <- Code to train models
-    │
-    └── plots.py                <- Code to create visualizations
+└── equipo52_module    <- Código del proyecto
+    ├── __init__.py
+    ├── config.py      <- Rutas y acuerdos del equipo (periodo, exclusiones, MLflow)
+    ├── dataset.py     <- Ingesta de los datos de MiBici
+    ├── features.py    <- Variables para los modelos
+    ├── modeling
+    │   ├── __init__.py
+    │   ├── predict.py <- Predicciones con modelos entrenados
+    │   └── train.py   <- Entrenamiento de modelos
+    └── plots.py       <- Gráficas
 ```
-
---------
-
