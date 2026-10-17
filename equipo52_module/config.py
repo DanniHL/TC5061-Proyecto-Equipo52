@@ -44,8 +44,14 @@ COLUMNAS_VIAJES = ["Viaje_Id", "Inicio_del_viaje", "Fin_del_viaje", "Origen_Id",
 # Las estaciones 124, 405 y 407 no aparecen en la nomenclatura y quedan fuera al unir con ella.
 ESTACIONES_EXCLUIDAS = [22, 97, 99, 109, 113, 114, 116, 138, 147, 149, 223, 240, 250, 310]
 
+# Viajes de menos de 1 minuto: no son viajes reales (la mayoría sale y regresa a la misma estación porque la
+# bicicleta se devuelve de inmediato). La ingesta los conserva; cada pregunta los excluye.
+DURACION_MINIMA_SEGUNDOS = 60
+
 # MLflow
 MLFLOW_EXPERIMENT = "mibici-equipo52"
+# Registro local en la raíz del proyecto; mlflow.db y mlartifacts/ están excluidos de Git.
+MLFLOW_TRACKING_URI = f"sqlite:///{PROJ_ROOT / 'mlflow.db'}"
 SEED = 42
 
 # If tqdm is installed, configure loguru with tqdm.write

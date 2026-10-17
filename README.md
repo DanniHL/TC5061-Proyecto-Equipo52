@@ -77,9 +77,37 @@ El comando:
 3. Lee de cada mes solo las columnas de `COLUMNAS_VIAJES`, resuelve las dos codificaciones y los dos formatos de fecha que usa MiBici, y guarda todos los viajes en `data/interim/viajes.parquet`. Si encuentra una fecha con un formato nuevo, se detiene y avisa.
 4. Escribe `references/manifiesto_datos.csv` con el número de registros, la huella SHA-256 y la liga de cada archivo. El manifiesto sí se guarda en Git: si otra persona corre la ingesta, sus huellas deben coincidir.
 
-Resultado esperado: 142 meses y 39,078,840 viajes.
+Resultado esperado: 142 meses y 39,078,984 viajes.
 
-Pendiente: los comandos de entrenamiento de cada pregunta y la vista de experimentos en MLflow se agregan cuando esos scripts se unan a `main`.
+MiBici puede volver a publicar archivos ya existentes: en octubre de 2026 corrigió abril y mayo de 2023 (la hora de los viajes y 144 viajes más). Si tu manifiesto no coincide con el del repositorio, borra de `data/raw/` los archivos con huella distinta y vuelve a correr la ingesta.
+
+### Experimento base de P2
+
+Requiere haber corrido la ingesta. Desde la carpeta del proyecto:
+
+```bash
+python equipo52_module/modeling/train_p2.py --modelo base --periodo completo
+python equipo52_module/modeling/train_p2.py --modelo hgb --periodo completo
+python equipo52_module/modeling/train_p2.py --modelo hgb --periodo postcovid
+python equipo52_module/modeling/train_p2.py --modelo hgb --periodo completo --balanceado
+```
+
+- `base`: repite lo que pasó en las últimas 4 semanas a la misma hora y día (falla si ocurrió en 2 o más).
+- `hgb`: HistGradientBoosting de scikit-learn con calendario, capacidad, ubicación, movimientos de las horas anteriores y fallas de las últimas 4 semanas.
+- `completo` entrena desde 2014-12-01 y `postcovid` desde 2023-05-09; las dos se prueban con abril a septiembre de 2026.
+- `--balanceado` da a las fallas el mismo peso que a las horas normales (más fallas detectadas, más alertas falsas).
+
+Cada corrida se registra en el experimento `mibici-equipo52` con fechas, versión y huella de datos, semilla, hiperparámetros, métricas `test_*`, etiquetas (equipo, pregunta, commit) y artefactos (tabla de aciertos y errores, porcentaje de clases por año y el modelo).
+
+### Ver los experimentos
+
+```bash
+mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+
+Abrir http://127.0.0.1:5000.
+
+Pendiente: los comandos de P1 y P3 se agregan cuando sus scripts se unan a `main`.
 
 ## Forma de trabajo en Git
 
