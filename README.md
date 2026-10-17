@@ -81,6 +81,21 @@ Resultado esperado: 142 meses y 39,078,984 viajes.
 
 MiBici puede volver a publicar archivos ya existentes: en octubre de 2026 corrigió abril y mayo de 2023 (la hora de los viajes y 144 viajes más). Si tu manifiesto no coincide con el del repositorio, borra de `data/raw/` los archivos con huella distinta y vuelve a correr la ingesta.
 
+### Experimento base de P1
+
+Requiere haber ejecutado la ingesta y contar con los datos procesados. Desde la raíz del proyecto se ejecuta:
+```bash
+python equipo52_module/modeling/train_p1.py
+```
+
+- `Baseline`: utiliza la demanda observada en el periodo anterior como referencia para el pronóstico.
+- `Regresión lineal`: estima la demanda futura a partir de las variables predictoras disponibles.
+- `Evaluación`: compara los modelos mediante MAE y RMSE. MAE mide el error absoluto promedio, mientras que RMSE penaliza con mayor peso los errores grandes.
+- `Registro en MLflow`: permite comparar las corridas y conservar los parámetros, las métricas, la información de los datos y los artefactos generados por cada modelo.
+
+Las corridas deben mantener el mismo criterio de evaluación para que la comparación sea consistente. Los resultados permitirán determinar si los modelos de regresión aportan una mejora frente a la persistencia y si su precisión resulta útil para la planeación operativa de MiBici.
+
+
 ### Experimento base de P2
 
 Requiere haber corrido la ingesta. Desde la carpeta del proyecto:
@@ -107,7 +122,7 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db
 
 Abrir http://127.0.0.1:5000.
 
-Pendiente: los comandos de P1 y P3 se agregan cuando sus scripts se unan a `main`.
+Pendiente: los comandos de P3 se agregan cuando sus scripts se unan a `main`.
 
 ## Forma de trabajo en Git
 
@@ -132,8 +147,23 @@ Pendiente: los comandos de P1 y P3 se agregan cuando sus scripts se unan a `main
 ├── docs               <- Documentación del proyecto (mkdocs)
 ├── models             <- Modelos entrenados
 ├── notebooks          <- Notebooks de exploración: número, iniciales y descripción
+    └── 1.0-dh-p1-exploración-datos.ipynb
+    └── 2.0-dh-p1-preparación-modelado.ipynb
+    └── 1.0-rr-p2-exploracion-datos.ipynb
+    └── 1.1-rr-p2-exploracion-estaciones.ipynb
+    └── 1.2-rr-p2-exploracion-flujo-neto.ipynb
+    └── *****Joel
+    └── *****Joel
+    └── graficas_p1
+        ├── regresion_ciclica_evaluacion_7_dias.png
+        ├── regresion_ciclica_real_vs_predicho.png
+        ├── regresion_estacion_real_vs_predicho.png
+        └── regresion_lineal_real_vs_predicho.png
+    
 ├── pyproject.toml     <- Datos del paquete equipo52_module y configuración de herramientas
 ├── references         <- Diccionarios de datos, manuales y material de consulta
+    └── .gitkeep
+    └── manifiesto_datos.csv
 ├── reports
 │   └── figures        <- Gráficas generadas para los reportes
 ├── requirements.txt   <- Paquetes con versión fija para reproducir el entorno
@@ -146,6 +176,9 @@ Pendiente: los comandos de P1 y P3 se agregan cuando sus scripts se unan a `main
     ├── modeling
     │   ├── __init__.py
     │   ├── predict.py <- Predicciones con modelos entrenados
+    │   ├── train_p1.py
+    │   ├── train_p2.py
+    │   ├── train_p3.py
     │   └── train.py   <- Entrenamiento de modelos
     └── plots.py       <- Gráficas
 ```
