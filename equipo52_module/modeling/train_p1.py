@@ -1,0 +1,847 @@
+"""
+P1 - Pronóstico de demanda de MiBici por estación.
+
+Flujo principal:
+1. Carga y validación de los viajes.
+2. Agregación diaria y análisis de cobertura.
+3. Construcción de variables temporales e históricas.
+4. División cronológica de entrenamiento y prueba.
+5. Entrenamiento y comparación de modelos.
+6. Evaluación recursiva a siete días.
+7. Registro de métricas, modelos y gráficas en MLflow.
+
+Los días sin registros se conservan como NaN; no se asume que equivalen
+automáticamente a días con cero viajes.
+"""
+
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import mlflow
+import mlflow.sklearn
+import numpy as np
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+from equipo52_module.config import PROCESSED_DATA_DIR
+
+
+# ---------------------------------------------------------------------
+# Configuración
+# ---------------------------------------------------------------------
+
+SEMILLA_P1 = 42  # Se conserva como referencia del proyecto; este flujo no usa aleatoriedad.
+URI_MLFLOW = "http://127.0.0.1:5000"
+EXPERIMENTO_MLFLOW = "MiBici-equipo52"
+FECHA_INICIO_PRUEBA = pd.Timestamp("2026-07-01")
+FECHA_FIN_PRUEBA = pd.Timestamp("2026-09-30")
+CARPETA_GRAFICAS = Path("graficas_p1")
+
+VARIABLES_HISTORICAS = [
+    "Viajes_dia_anterior",
+    "Viajes_hace_7_dias",
+    "Promedio_7_dias",
+]
+VARIABLES_CICLICAS = [
+    *VARIABLES_HISTORICAS,
+    "Fin_de_semana",
+    "Dia_semana_sin",
+    "Dia_semana_cos",
+    "Mes_sin",
+    "Mes_cos",
+]
+
+
+# ---------------------------------------------------------------------
+# 1. Carga y preparación de los datos
+# ---------------------------------------------------------------------
+
+def cargar_viajes_p1(ruta_archivo=None):
+    """Carga los viajes filtrados y valida el tipo de la fecha."""
+    if ruta_archivo is None:
+        ruta_archivo = PROCESSED_DATA_DIR / "viajes_p1_filtrados.parquet"
+
+    viajes = pd.read_parquet(ruta_archivo)
+    if "Inicio_del_viaje" not in viajes.columns or "Origen_Id" not in viajes.columns:
+        raise ValueError(
+            "El archivo debe contener las columnas 'Inicio_del_viaje' y 'Origen_Id'."
+        )
+
+    viajes["Inicio_del_viaje"] = pd.to_datetime(
+        viajes["Inicio_del_viaje"], errors="raise"
+    )
+
+    print(f"Registros originales: {len(viajes):,}")
+    print(f"Columnas: {viajes.shape[1]}")
+    print(f"Fecha inicial: {viajes['Inicio_del_viaje'].min()}")
+    print(f"Fecha final: {viajes['Inicio_del_viaje'].max()}")
+    return viajes
+
+
+def construir_demanda_diaria(viajes):
+    """Cuenta los viajes iniciados por estación y fecha."""
+    demanda = (
+        viajes.assign(Fecha=viajes["Inicio_del_viaje"].dt.normalize())
+        .groupby(["Origen_Id", "Fecha"])
+        .size()
+        .reset_index(name="Numero_viajes")
+        .sort_values(["Origen_Id", "Fecha"])
+        .reset_index(drop=True)
+    )
+
+    total_original = len(viajes)
+    total_agregado = int(demanda["Numero_viajes"].sum())
+    duplicados = int(demanda.duplicated(["Origen_Id", "Fecha"]).sum())
+
+    print(f"Registros diarios estación-fecha: {len(demanda):,}")
+    print(f"Estaciones: {demanda['Origen_Id'].nunique():,}")
+    print(f"Fechas: {demanda['Fecha'].min()} a {demanda['Fecha'].max()}")
+    print(f"Viajes originales: {total_original:,}")
+    print(f"Viajes agregados: {total_agregado:,}")
+    print(f"Diferencia de viajes: {total_original - total_agregado:,}")
+    print(f"Duplicados estación-fecha: {duplicados:,}")
+
+    assert total_original == total_agregado, "La agregación no conserva todos los viajes."
+    assert duplicados == 0, "Hay más de un registro por estación y fecha."
+    return demanda
+
+
+def resumir_historial_estaciones(demanda):
+    """Resume fechas observadas, viajes y cobertura por estación."""
+    historial = (
+        demanda.groupby("Origen_Id")
+        .agg(
+            Primera_fecha=("Fecha", "min"),
+            Ultima_fecha=("Fecha", "max"),
+            Dias_con_registros=("Fecha", "nunique"),
+            Total_viajes=("Numero_viajes", "sum"),
+        )
+        .reset_index()
+    )
+
+    historial["Dias_calendario"] = (
+        historial["Ultima_fecha"] - historial["Primera_fecha"]
+    ).dt.days + 1
+    historial["Dias_sin_registro"] = (
+        historial["Dias_calendario"] - historial["Dias_con_registros"]
+    )
+    historial["Cobertura_pct"] = (
+        historial["Dias_con_registros"] / historial["Dias_calendario"] * 100
+    )
+
+    print(f"Estaciones con historial: {historial['Origen_Id'].nunique():,}")
+    print(
+        "Cobertura promedio: "
+        f"{historial['Cobertura_pct'].mean():.2f}%"
+    )
+    print(
+        "Estaciones con cobertura menor al 90%: "
+        f"{(historial['Cobertura_pct'] < 90).sum():,}"
+    )
+    return historial
+
+
+def analizar_huecos_por_estacion(demanda, historial, umbral_cobertura=90):
+    """Identifica el mayor intervalo sin registros para estaciones con baja cobertura."""
+    estaciones_baja = historial.loc[
+        historial["Cobertura_pct"] < umbral_cobertura
+    ].copy()
+    resultados = []
+
+    fechas_por_estacion = {
+        estacion: pd.DatetimeIndex(grupo["Fecha"].sort_values().unique())
+        for estacion, grupo in demanda.groupby("Origen_Id")
+    }
+
+    for estacion in estaciones_baja["Origen_Id"]:
+        fechas_observadas = fechas_por_estacion.get(estacion, pd.DatetimeIndex([]))
+        if len(fechas_observadas) == 0:
+            continue
+
+        calendario = pd.date_range(
+            fechas_observadas.min(), fechas_observadas.max(), freq="D"
+        )
+        faltantes = calendario.difference(fechas_observadas)
+        if len(faltantes) == 0:
+            continue
+
+        grupos = pd.Series(faltantes).diff().dt.days.ne(1).cumsum()
+        huecos = (
+            pd.DataFrame({"Fecha": faltantes, "Grupo": grupos.to_numpy()})
+            .groupby("Grupo")["Fecha"]
+            .agg(Inicio="min", Fin="max", Dias="size")
+        )
+        mayor = huecos.loc[huecos["Dias"].idxmax()]
+
+        resultados.append({
+            "Origen_Id": estacion,
+            "Dias_faltantes": len(faltantes),
+            "Mayor_hueco_dias": int(mayor["Dias"]),
+            "Inicio_mayor_hueco": mayor["Inicio"],
+            "Fin_mayor_hueco": mayor["Fin"],
+        })
+
+    huecos_df = pd.DataFrame(resultados)
+    if not huecos_df.empty:
+        huecos_df = huecos_df.sort_values(
+            "Mayor_hueco_dias", ascending=False
+        ).reset_index(drop=True)
+    return estaciones_baja, huecos_df
+
+
+# ---------------------------------------------------------------------
+# 2. Calendario y variables históricas
+# ---------------------------------------------------------------------
+
+def agregar_variables_calendario(datos):
+    """Añade variables de calendario derivadas de Fecha."""
+    resultado = datos.copy()
+    resultado["Dia_semana"] = resultado["Fecha"].dt.dayofweek
+    resultado["Mes"] = resultado["Fecha"].dt.month
+    resultado["Anio"] = resultado["Fecha"].dt.year
+    resultado["Dia_mes"] = resultado["Fecha"].dt.day
+    resultado["Fin_de_semana"] = (resultado["Dia_semana"] >= 5).astype(int)
+    return resultado
+
+
+def completar_calendario_por_estacion(demanda):
+    """
+    Completa las fechas entre la primera y última observación de cada estación.
+    Los días no observados quedan como NaN, nunca se convierten a cero aquí.
+    """
+    series = []
+    for estacion, grupo in demanda.groupby("Origen_Id", sort=False):
+        grupo = grupo.sort_values("Fecha").set_index("Fecha")
+        calendario = pd.date_range(grupo.index.min(), grupo.index.max(), freq="D")
+        grupo_diario = grupo.reindex(calendario)
+        grupo_diario.index.name = "Fecha"
+        grupo_diario["Origen_Id"] = estacion
+        series.append(grupo_diario)
+
+    if not series:
+        raise ValueError("No hay registros para construir el calendario.")
+
+    completo = (
+        pd.concat(series)
+        .reset_index()
+        .sort_values(["Origen_Id", "Fecha"])
+        .reset_index(drop=True)
+    )
+    completo = agregar_variables_calendario(completo)
+
+    print(f"Registros tras completar calendarios: {len(completo):,}")
+    print(
+        "Días sin registro conservados como faltantes: "
+        f"{completo['Numero_viajes'].isna().sum():,}"
+    )
+    return completo
+
+
+def agregar_variables_historicas(datos):
+    """
+    Añade demanda del día anterior, de hace siete días y promedio de los
+    siete días anteriores. Los faltantes se propagan sin imputarlos.
+    """
+    resultado = datos.sort_values(["Origen_Id", "Fecha"]).copy()
+    grupo = resultado.groupby("Origen_Id")["Numero_viajes"]
+
+    resultado["Viajes_dia_anterior"] = grupo.shift(1)
+    resultado["Viajes_hace_7_dias"] = grupo.shift(7)
+    resultado["Promedio_7_dias"] = grupo.transform(
+        lambda serie: serie.shift(1).rolling(window=7, min_periods=7).mean()
+    )
+    return resultado.reset_index(drop=True)
+
+
+def agregar_variables_ciclicas(datos):
+    """Representa día de semana y mes mediante seno y coseno."""
+    resultado = datos.copy()
+    resultado["Dia_semana_sin"] = np.sin(2 * np.pi * resultado["Dia_semana"] / 7)
+    resultado["Dia_semana_cos"] = np.cos(2 * np.pi * resultado["Dia_semana"] / 7)
+    resultado["Mes_sin"] = np.sin(2 * np.pi * (resultado["Mes"] - 1) / 12)
+    resultado["Mes_cos"] = np.cos(2 * np.pi * (resultado["Mes"] - 1) / 12)
+    return resultado
+
+
+def separar_datos_cronologicamente(datos, fecha_inicio_prueba=FECHA_INICIO_PRUEBA):
+    """Filtra registros completos y separa entrenamiento/prueba por fecha."""
+    columnas_requeridas = ["Numero_viajes", *VARIABLES_HISTORICAS]
+    mascara_valida = datos[columnas_requeridas].notna().all(axis=1)
+    datos_validos = datos.loc[mascara_valida].copy()
+
+    entrenamiento = datos_validos.loc[
+        datos_validos["Fecha"] < fecha_inicio_prueba
+    ].copy()
+    prueba = datos_validos.loc[
+        datos_validos["Fecha"] >= fecha_inicio_prueba
+    ].copy()
+
+    if entrenamiento.empty or prueba.empty:
+        raise ValueError(
+            "La separación temporal produjo un conjunto vacío. "
+            "Revisa las fechas y la cobertura del archivo."
+        )
+
+    print(f"Registros válidos: {len(datos_validos):,}")
+    print(f"Entrenamiento: {len(entrenamiento):,}")
+    print(f"Prueba: {len(prueba):,}")
+    print(f"Última fecha de entrenamiento: {entrenamiento['Fecha'].max()}")
+    print(f"Primera fecha de prueba: {prueba['Fecha'].min()}")
+    print(f"Última fecha de prueba: {prueba['Fecha'].max()}")
+    return datos_validos, entrenamiento, prueba
+
+
+# ---------------------------------------------------------------------
+# 3. Métricas, gráficas y registro en MLflow
+# ---------------------------------------------------------------------
+
+def calcular_metricas(y_real, y_predicho):
+    """Devuelve MAE y RMSE como números de punto flotante."""
+    return {
+        "MAE": float(mean_absolute_error(y_real, y_predicho)),
+        "RMSE": float(np.sqrt(mean_squared_error(y_real, y_predicho))),
+    }
+
+
+def guardar_grafica_comparacion(y_real, y_predicho, titulo, nombre_archivo,
+                                etiqueta_real="Demanda real",
+                                etiqueta_predicha="Demanda predicha"):
+    """Guarda una gráfica compacta de valores reales y predichos."""
+    CARPETA_GRAFICAS.mkdir(parents=True, exist_ok=True)
+    reales = np.asarray(y_real).reshape(-1)
+    predichos = np.asarray(y_predicho).reshape(-1)
+
+    if len(reales) == 0:
+        raise ValueError("No hay observaciones para graficar.")
+
+    indices = np.unique(
+        np.linspace(0, len(reales) - 1, min(300, len(reales)), dtype=int)
+    )
+    fig, ax = plt.subplots(figsize=(12, 5))
+    ax.plot(indices, reales[indices], label=etiqueta_real, linewidth=1.5)
+    ax.plot(indices, predichos[indices], label=etiqueta_predicha, linewidth=1.5)
+    ax.set_title(titulo)
+    ax.set_xlabel("Observaciones del conjunto de prueba")
+    ax.set_ylabel("Número de viajes")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+
+    ruta = CARPETA_GRAFICAS / nombre_archivo
+    fig.savefig(ruta, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return ruta
+
+
+def configurar_mlflow():
+    """Selecciona el servidor y experimento de MLflow."""
+    mlflow.set_tracking_uri(URI_MLFLOW)
+    mlflow.set_experiment(EXPERIMENTO_MLFLOW)
+    print("Tracking URI:", mlflow.get_tracking_uri())
+    print("Experimento:", EXPERIMENTO_MLFLOW)
+
+
+def registrar_resultado_mlflow(nombre_run, parametros, metricas, etiquetas=None,
+                               modelo=None, ruta_grafica=None):
+    """Registra parámetros, métricas, etiquetas y artefactos de una ejecución."""
+    with mlflow.start_run(run_name=nombre_run):
+        mlflow.log_params(parametros)
+        mlflow.log_metrics(
+            {nombre: float(valor) for nombre, valor in metricas.items()}
+        )
+        for clave, valor in (etiquetas or {}).items():
+            mlflow.set_tag(clave, valor)
+        if modelo is not None:
+            mlflow.sklearn.log_model(modelo, name="modelo")
+        if ruta_grafica is not None:
+            mlflow.log_artifact(str(ruta_grafica))
+
+
+# ---------------------------------------------------------------------
+# 4. Modelos de un día adelante
+# ---------------------------------------------------------------------
+
+def evaluar_baseline(datos_entrenamiento, datos_prueba):
+    """Evalúa el baseline que predice la demanda del día anterior."""
+    evaluacion = datos_prueba.dropna(
+        subset=["Numero_viajes", "Viajes_dia_anterior"]
+    ).copy()
+    evaluacion["Prediccion_baseline"] = evaluacion["Viajes_dia_anterior"]
+    metricas = calcular_metricas(
+        evaluacion["Numero_viajes"], evaluacion["Prediccion_baseline"]
+    )
+
+    registrar_resultado_mlflow(
+        nombre_run="Baseline_P1",
+        parametros={
+            "modelo": "Baseline",
+            "horizonte_dias": 1,
+            "fecha_inicio_prueba": str(FECHA_INICIO_PRUEBA.date()),
+            "registros_entrenamiento": len(datos_entrenamiento),
+            "registros_prueba": len(evaluacion),
+        },
+        metricas=metricas,
+        etiquetas={
+            "tipo_experimento": "baseline",
+            "pregunta_proyecto": "P1",
+            "limitacion": "Evaluacion de un dia adelante; no es el pronostico a siete dias",
+        },
+    )
+    print("Baseline:", metricas)
+    return evaluacion, metricas
+
+
+def entrenar_regresion_lineal(datos_entrenamiento, datos_prueba):
+    """Entrena regresión lineal con variables históricas y de calendario."""
+    variables = [
+        *VARIABLES_HISTORICAS,
+        "Dia_semana",
+        "Mes",
+        "Fin_de_semana",
+    ]
+    train = datos_entrenamiento.dropna(subset=variables + ["Numero_viajes"]).copy()
+    test = datos_prueba.dropna(subset=variables + ["Numero_viajes"]).copy()
+    X_train, y_train = train[variables], train["Numero_viajes"]
+    X_test, y_test = test[variables], test["Numero_viajes"]
+
+    modelo = Pipeline([
+        ("escalador", StandardScaler()),
+        ("regresion", LinearRegression()),
+    ])
+    modelo.fit(X_train, y_train)
+    predicciones = modelo.predict(X_test)
+    metricas = calcular_metricas(y_test, predicciones)
+    ruta = guardar_grafica_comparacion(
+        y_test,
+        predicciones,
+        "Regresión lineal: demanda real vs. predicha en test",
+        "regresion_lineal_real_vs_predicho.png",
+    )
+
+    registrar_resultado_mlflow(
+        "Pipeline_Regresion_Lineal_P1",
+        {
+            "modelo": "LinearRegression",
+            "preprocesamiento": "StandardScaler",
+            "registros_entrenamiento": len(X_train),
+            "registros_prueba": len(X_test),
+            "fecha_inicio_prueba": str(FECHA_INICIO_PRUEBA.date()),
+            "horizonte_dias": 1,
+        },
+        metricas,
+        etiquetas={"tipo_experimento": "pipeline"},
+        modelo=modelo,
+        ruta_grafica=ruta,
+    )
+
+    coeficientes = pd.DataFrame({
+        "Variable": variables,
+        "Coeficiente": modelo.named_steps["regresion"].coef_,
+    })
+    coeficientes["Magnitud_absoluta"] = coeficientes["Coeficiente"].abs()
+    coeficientes = coeficientes.sort_values(
+        "Magnitud_absoluta", ascending=False
+    ).reset_index(drop=True)
+
+    print("Regresión lineal:", metricas)
+    print("Gráfica guardada en:", ruta)
+    return modelo, metricas, coeficientes
+
+
+def entrenar_regresion_con_estacion(datos_entrenamiento, datos_prueba):
+    """Entrena una regresión que codifica Origen_Id como variable categórica."""
+    variables_numericas = [
+        *VARIABLES_HISTORICAS,
+        "Dia_semana",
+        "Mes",
+        "Fin_de_semana",
+    ]
+    columnas = variables_numericas + ["Origen_Id"]
+    train = datos_entrenamiento.dropna(
+        subset=columnas + ["Numero_viajes"]
+    ).copy()
+    test = datos_prueba.dropna(subset=columnas + ["Numero_viajes"]).copy()
+
+    X_train, y_train = train[columnas].copy(), train["Numero_viajes"]
+    X_test, y_test = test[columnas].copy(), test["Numero_viajes"]
+    X_train["Origen_Id"] = X_train["Origen_Id"].astype(str)
+    X_test["Origen_Id"] = X_test["Origen_Id"].astype(str)
+
+    preprocesador = ColumnTransformer([
+        ("numericas", StandardScaler(), variables_numericas),
+        ("estacion", OneHotEncoder(handle_unknown="ignore"), ["Origen_Id"]),
+    ])
+    modelo = Pipeline([
+        ("preprocesamiento", preprocesador),
+        ("regresion", LinearRegression()),
+    ])
+    modelo.fit(X_train, y_train)
+    predicciones = modelo.predict(X_test)
+    metricas = calcular_metricas(y_test, predicciones)
+    ruta = guardar_grafica_comparacion(
+        y_test,
+        predicciones,
+        "Regresión lineal con estación: demanda real vs. predicha",
+        "regresion_estacion_real_vs_predicho.png",
+    )
+
+    registrar_resultado_mlflow(
+        "Pipeline_Regresion_Estacion_P1",
+        {
+            "modelo": "LinearRegression",
+            "preprocesamiento": "StandardScaler + OneHotEncoder",
+            "registros_entrenamiento": len(X_train),
+            "registros_prueba": len(X_test),
+            "fecha_inicio_prueba": str(FECHA_INICIO_PRUEBA.date()),
+            "horizonte_dias": 1,
+        },
+        metricas,
+        etiquetas={"tipo_experimento": "pipeline_con_estacion"},
+        modelo=modelo,
+        ruta_grafica=ruta,
+    )
+    print("Regresión con estación:", metricas)
+    return modelo, metricas
+
+
+def entrenar_regresion_ciclica(datos_entrenamiento, datos_prueba):
+    """Entrena regresión lineal usando codificación cíclica del calendario."""
+    train = agregar_variables_ciclicas(datos_entrenamiento)
+    test = agregar_variables_ciclicas(datos_prueba)
+    train = train.dropna(subset=VARIABLES_CICLICAS + ["Numero_viajes"])
+    test = test.dropna(subset=VARIABLES_CICLICAS + ["Numero_viajes"])
+
+    X_train, y_train = train[VARIABLES_CICLICAS], train["Numero_viajes"]
+    X_test, y_test = test[VARIABLES_CICLICAS], test["Numero_viajes"]
+
+    modelo = Pipeline([
+        ("escalador", StandardScaler()),
+        ("regresion", LinearRegression()),
+    ])
+    modelo.fit(X_train, y_train)
+    predicciones = modelo.predict(X_test)
+    metricas = calcular_metricas(y_test, predicciones)
+    ruta = guardar_grafica_comparacion(
+        y_test,
+        predicciones,
+        "Regresión cíclica: demanda real vs. predicha",
+        "regresion_ciclica_real_vs_predicho.png",
+    )
+
+    registrar_resultado_mlflow(
+        "Pipeline_Regresion_Ciclica_P1",
+        {
+            "modelo": "LinearRegression",
+            "preprocesamiento": "StandardScaler",
+            "horizonte_dias": 1,
+            "fecha_inicio_prueba": str(FECHA_INICIO_PRUEBA.date()),
+            "registros_entrenamiento": len(X_train),
+            "registros_prueba": len(X_test),
+        },
+        metricas,
+        etiquetas={"tipo_experimento": "pipeline_regresion_ciclica"},
+        modelo=modelo,
+        ruta_grafica=ruta,
+    )
+    print("Regresión cíclica:", metricas)
+    return modelo, metricas
+
+
+# ---------------------------------------------------------------------
+# 5. Pronóstico recursivo a siete días
+# ---------------------------------------------------------------------
+
+def construir_matriz_demanda(demanda_completa):
+    """Crea una matriz estación x fecha para consultar demanda histórica."""
+    return (
+        demanda_completa.pivot(
+            index="Origen_Id", columns="Fecha", values="Numero_viajes"
+        )
+        .sort_index(axis=1)
+    )
+
+
+def pronosticar_siete_dias(matriz_demanda, modelo, fecha_inicio="2026-06-30",
+                           fecha_fin="2026-09-23"):
+    """
+    Evalúa orígenes móviles. Cada estación necesita siete días consecutivos
+    de historial conocido al inicio; dentro del horizonte se usan predicciones.
+    """
+    origenes = pd.date_range(fecha_inicio, fecha_fin, freq="D")
+    resultados = []
+
+    for fecha_origen in origenes:
+        fechas_historial = pd.date_range(end=fecha_origen, periods=7, freq="D")
+        historial_origen = (
+            matriz_demanda.reindex(columns=fechas_historial)
+            .dropna(axis=0, how="any")
+        )
+        historiales = {
+            estacion: historial_origen.loc[estacion].to_numpy(dtype=float).tolist()
+            for estacion in historial_origen.index
+        }
+
+        for horizonte in range(1, 8):
+            fecha_objetivo = fecha_origen + pd.Timedelta(days=horizonte)
+            estaciones = list(historiales)
+            if not estaciones:
+                break
+
+            filas = []
+            for estacion in estaciones:
+                historial = historiales[estacion][-7:]
+                filas.append({
+                    "Viajes_dia_anterior": historial[-1],
+                    "Viajes_hace_7_dias": historial[0],
+                    "Promedio_7_dias": float(np.mean(historial)),
+                    "Fin_de_semana": int(fecha_objetivo.dayofweek >= 5),
+                    "Dia_semana_sin": np.sin(
+                        2 * np.pi * fecha_objetivo.dayofweek / 7
+                    ),
+                    "Dia_semana_cos": np.cos(
+                        2 * np.pi * fecha_objetivo.dayofweek / 7
+                    ),
+                    "Mes_sin": np.sin(
+                        2 * np.pi * (fecha_objetivo.month - 1) / 12
+                    ),
+                    "Mes_cos": np.cos(
+                        2 * np.pi * (fecha_objetivo.month - 1) / 12
+                    ),
+                })
+
+            X_futuro = pd.DataFrame(filas, columns=VARIABLES_CICLICAS)
+            predicciones = modelo.predict(X_futuro)
+            reales = matriz_demanda.reindex(
+                index=estaciones, columns=[fecha_objetivo]
+            )[fecha_objetivo]
+
+            for i, estacion in enumerate(estaciones):
+                resultados.append({
+                    "Fecha_origen": fecha_origen,
+                    "Fecha_pronostico": fecha_objetivo,
+                    "Horizonte_dias": horizonte,
+                    "Origen_Id": estacion,
+                    "Numero_viajes_real": reales.loc[estacion],
+                    "Numero_viajes_predicho": float(predicciones[i]),
+                })
+                historiales[estacion].append(float(predicciones[i]))
+                historiales[estacion] = historiales[estacion][-7:]
+
+    pronosticos = pd.DataFrame(resultados)
+    if pronosticos.empty:
+        raise ValueError("No se generaron pronósticos; revisa las fechas y el historial.")
+    print(f"Pronósticos generados: {len(pronosticos):,}")
+    print(f"Estaciones evaluadas: {pronosticos['Origen_Id'].nunique():,}")
+    print(
+        "Fechas pronosticadas:",
+        pronosticos["Fecha_pronostico"].min(),
+        "a",
+        pronosticos["Fecha_pronostico"].max(),
+    )
+    return pronosticos
+
+
+def evaluar_pronostico_siete_dias(pronosticos, matriz_demanda):
+    """Calcula métricas por horizonte y globales, y compara contra baseline."""
+    evaluables = pronosticos.dropna(subset=["Numero_viajes_real"]).copy()
+    if evaluables.empty:
+        raise ValueError("No hay pronósticos con demanda real para evaluar.")
+
+    filas = []
+    for horizonte, grupo in evaluables.groupby("Horizonte_dias"):
+        metricas = calcular_metricas(
+            grupo["Numero_viajes_real"], grupo["Numero_viajes_predicho"]
+        )
+        filas.append({
+            "Horizonte_dias": int(horizonte),
+            **metricas,
+            "Registros_evaluados": len(grupo),
+        })
+    metricas_horizonte = pd.DataFrame(filas)
+
+    metricas_globales = calcular_metricas(
+        evaluables["Numero_viajes_real"],
+        evaluables["Numero_viajes_predicho"],
+    )
+
+    comparacion = evaluables.copy()
+    comparacion["Prediccion_baseline"] = [
+        matriz_demanda.loc[estacion, fecha]
+        for estacion, fecha in zip(
+            comparacion["Origen_Id"], comparacion["Fecha_origen"]
+        )
+    ]
+    filas_comparacion = []
+    for horizonte, grupo in comparacion.groupby("Horizonte_dias"):
+        reales = grupo["Numero_viajes_real"]
+        metricas_modelo = calcular_metricas(
+            reales, grupo["Numero_viajes_predicho"]
+        )
+        metricas_baseline = calcular_metricas(reales, grupo["Prediccion_baseline"])
+        filas_comparacion.append({
+            "Horizonte_dias": int(horizonte),
+            "MAE_modelo": metricas_modelo["MAE"],
+            "RMSE_modelo": metricas_modelo["RMSE"],
+            "MAE_baseline": metricas_baseline["MAE"],
+            "RMSE_baseline": metricas_baseline["RMSE"],
+            "Registros": len(grupo),
+        })
+    comparacion_metricas = pd.DataFrame(filas_comparacion)
+
+    resumen_grafica = (
+        evaluables.groupby("Horizonte_dias", as_index=False)
+        .agg(
+            Numero_viajes_real=("Numero_viajes_real", "mean"),
+            Numero_viajes_predicho=("Numero_viajes_predicho", "mean"),
+        )
+        .sort_values("Horizonte_dias")
+    )
+    CARPETA_GRAFICAS.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(
+        resumen_grafica["Horizonte_dias"],
+        resumen_grafica["Numero_viajes_real"],
+        marker="o",
+        label="Demanda real promedio",
+    )
+    ax.plot(
+        resumen_grafica["Horizonte_dias"],
+        resumen_grafica["Numero_viajes_predicho"],
+        marker="o",
+        label="Demanda predicha promedio",
+    )
+    ax.set_title("Pronóstico recursivo de demanda: horizonte de 7 días")
+    ax.set_xlabel("Horizonte de pronóstico (días)")
+    ax.set_ylabel("Promedio de viajes")
+    ax.set_xticks(range(1, 8))
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    ruta = CARPETA_GRAFICAS / "regresion_ciclica_evaluacion_7_dias.png"
+    fig.savefig(ruta, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    registrar_resultado_mlflow(
+        "Pipeline_Regresion_Ciclica_7Dias_P1",
+        {
+            "modelo": "Regresion_lineal_con_variables_ciclicas",
+            "horizonte_dias": 7,
+            "fecha_inicio_prueba": str(FECHA_INICIO_PRUEBA.date()),
+            "fecha_fin_prueba": str(FECHA_FIN_PRUEBA.date()),
+            "tipo_evaluacion": "recursiva",
+        },
+        metricas_globales,
+        etiquetas={"tipo_experimento": "evaluacion_recursiva_7_dias"},
+        ruta_grafica=ruta,
+    )
+
+    print("Métricas por horizonte:")
+    print(metricas_horizonte.round(3).to_string(index=False))
+    print("Métricas globales:", metricas_globales)
+    print("Comparación con baseline:")
+    print(comparacion_metricas.round(3).to_string(index=False))
+    print("Gráfica guardada en:", ruta)
+
+    return evaluables, metricas_horizonte, metricas_globales, comparacion_metricas
+
+
+# ---------------------------------------------------------------------
+# 6. Orquestación del flujo
+# ---------------------------------------------------------------------
+
+def main():
+    """Ejecuta el flujo completo de preparación, entrenamiento y evaluación."""
+    configurar_mlflow()
+
+    viajes = cargar_viajes_p1()
+    demanda = construir_demanda_diaria(viajes)
+
+    historial_estaciones = resumir_historial_estaciones(demanda)
+    estaciones_baja, resumen_huecos = analizar_huecos_por_estacion(
+        demanda, historial_estaciones
+    )
+    print("\nEstaciones con baja cobertura:")
+    print(estaciones_baja.sort_values("Cobertura_pct").head(10).to_string(index=False))
+    print("\nMayores intervalos sin registros:")
+    if not resumen_huecos.empty:
+        print(resumen_huecos.head(10).to_string(index=False))
+
+    demanda_completa = completar_calendario_por_estacion(demanda)
+    demanda_completa = agregar_variables_historicas(demanda_completa)
+
+    columnas_modelo = ["Numero_viajes", *VARIABLES_HISTORICAS]
+    mascara_valida = demanda_completa[columnas_modelo].notna().all(axis=1)
+    print(f"\nRegistros totales tras completar calendario: {len(demanda_completa):,}")
+    print(f"Registros con variables completas: {mascara_valida.sum():,}")
+    print(f"Registros no utilizables: {(~mascara_valida).sum():,}")
+    print(
+        "Porcentaje utilizable: "
+        f"{mascara_valida.mean() * 100:.2f}%"
+    )
+
+    datos_validos, entrenamiento, prueba = separar_datos_cronologicamente(
+        demanda_completa
+    )
+
+    # Baseline y modelos de un día adelante.
+    _, metricas_baseline = evaluar_baseline(entrenamiento, prueba)
+    _, metricas_lineal, coeficientes = entrenar_regresion_lineal(
+        entrenamiento, prueba
+    )
+    _, metricas_estacion = entrenar_regresion_con_estacion(
+        entrenamiento, prueba
+    )
+    modelo_ciclico, metricas_ciclicas = entrenar_regresion_ciclica(
+        entrenamiento, prueba
+    )
+
+    print("\nCoeficientes de regresión lineal:")
+    print(coeficientes.to_string(index=False))
+    print("\nComparación de modelos de un día:")
+    print(pd.DataFrame([
+        {"Modelo": "Baseline", **metricas_baseline},
+        {"Modelo": "Regresión lineal", **metricas_lineal},
+        {"Modelo": "Regresión con estación", **metricas_estacion},
+        {"Modelo": "Regresión cíclica", **metricas_ciclicas},
+    ]).round(3).to_string(index=False))
+
+    # Evaluación recursiva a siete días.
+    matriz_demanda = construir_matriz_demanda(demanda_completa)
+    pronosticos = pronosticar_siete_dias(matriz_demanda, modelo_ciclico)
+    evaluables, metricas_horizonte, metricas_globales, comparacion_7d = (
+        evaluar_pronostico_siete_dias(pronosticos, matriz_demanda)
+    )
+
+    print("\nPronósticos negativos:", int(
+        (pronosticos["Numero_viajes_predicho"] < 0).sum()
+    ))
+
+    # Se devuelven los principales objetos para facilitar su reutilización
+    # si el módulo se importa desde otro script o notebook.
+    return {
+        "demanda_diaria": demanda,
+        "historial_estaciones": historial_estaciones,
+        "demanda_completa": demanda_completa,
+        "datos_validos": datos_validos,
+        "entrenamiento": entrenamiento,
+        "prueba": prueba,
+        "metricas_baseline": metricas_baseline,
+        "metricas_lineal": metricas_lineal,
+        "metricas_estacion": metricas_estacion,
+        "metricas_ciclicas": metricas_ciclicas,
+        "coeficientes_lineal": coeficientes,
+        "modelo_ciclico": modelo_ciclico,
+        "pronosticos_7d": pronosticos,
+        "pronosticos_evaluables_7d": evaluables,
+        "metricas_horizonte_7d": metricas_horizonte,
+        "metricas_globales_7d": metricas_globales,
+        "comparacion_metricas_7d": comparacion_7d,
+    }
+
+
+if __name__ == "__main__":
+    RESULTADOS_P1 = main()
