@@ -208,3 +208,4 @@ venv/
 # Archivos de respaldo
 *.bak
 requirements_backup.txt
+.venv312/
