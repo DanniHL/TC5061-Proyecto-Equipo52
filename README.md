@@ -99,6 +99,26 @@ python equipo52_module/modeling/train_p2.py --modelo hgb --periodo completo --ba
 
 Cada corrida se registra en el experimento `mibici-equipo52` con fechas, versión y huella de datos, semilla, hiperparámetros, métricas `test_*`, etiquetas (equipo, pregunta, commit) y artefactos (tabla de aciertos y errores, porcentaje de clases por año y el modelo).
 
+### Experimento base de P3
+
+Requiere haber corrido la ingesta. Desde la carpeta del proyecto:
+
+```bash
+python equipo52_module/modeling/train_p3.py --modelo geo
+python equipo52_module/modeling/train_p3.py --modelo kmeans
+python equipo52_module/modeling/train_p3.py --modelo kmeans --k 4
+python equipo52_module/modeling/train_p3.py --modelo ward
+python equipo52_module/modeling/train_p3.py --modelo hdbscan
+```
+
+- `geo`: línea base. K-Means con k = 5 solo sobre latitud y longitud; su silueta se mide en el espacio de características de uso, para ver si las zonas geográficas también son coherentes en comportamiento.
+- `kmeans`: candidato principal. Describe cada estación con 42 características de uso (actividad por mes activo y por anclaje, firma horaria y semanal, balance de flujos, tipo de viaje y evolución) calculadas con toda la historia; elige k por silueta en el barrido 2-12, o fijo con `--k`.
+- `ward`: agrupamiento jerárquico con enlace Ward al mismo procedimiento de k; reporta el ARI de concordancia con K-Means y el dendrograma.
+- `hdbscan`: diagnóstico. Detecta núcleos densos y marca como ruido las estaciones que no comparten patrón con ningún grupo (`--min-cluster-size`, 15 por omisión).
+- Para los candidatos se reporta la estabilidad: `estabilidad_eras_ari` compara la asignación entre dos eras de la historia (corte 2020-09) y `estabilidad_bootstrap_ari` re-entrena con remuestreos del 80 % de las estaciones.
+
+Cada corrida se registra en `mibici-equipo52` con fechas, versión y huella de datos, semilla, hiperparámetros, métricas `hist_*` y de estabilidad, etiquetas (equipo, pregunta, commit) y artefactos (mapa de grupos, perfiles horarios, silueta por k, dendrograma, matriz estación × característica y descripción de grupos). La matriz y las descripciones quedan en `data/processed/` y las figuras en `reports/figures/`.
+
 ### Ver los experimentos
 
 ```bash
@@ -107,7 +127,7 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db
 
 Abrir http://127.0.0.1:5000.
 
-Pendiente: los comandos de P1 y P3 se agregan cuando sus scripts se unan a `main`.
+Pendiente: los comandos de P1 se agregan cuando su script se una a `main`.
 
 ## Forma de trabajo en Git
 
