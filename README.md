@@ -89,7 +89,7 @@ MiBici puede volver a publicar archivos ya existentes: en octubre de 2026 corrig
 
 ### Experimento base de P1
 
-Requiere haber ejecutado la ingesta y contar con los datos procesados. Desde la raíz del proyecto se ejecuta:
+Requiere haber corrido la ingesta: `train_p1.py` prepara sus datos desde `data/interim/viajes.parquet` (periodo del proyecto, sin las 14 estaciones excluidas). Desde la raíz del proyecto se ejecuta:
 ```bash
 python equipo52_module/modeling/train_p1.py
 ```
@@ -180,19 +180,12 @@ Abrir http://127.0.0.1:5000.
     └── 1.2-rr-p2-exploracion-flujo-neto.ipynb
     └── 3.0-js-p3-exploracion-estaciones.ipynb
     └── 3.1-js-p3-agrupamiento.ipynb
-
-├── graficas_p1        <- Gráficas de evaluación de los modelos de P1
-│   ├── regresion_ciclica_evaluacion_7_dias.png
-│   ├── regresion_ciclica_real_vs_predicho.png
-│   ├── regresion_estacion_real_vs_predicho.png
-│   └── regresion_lineal_real_vs_predicho.png
-
 ├── pyproject.toml     <- Datos del paquete equipo52_module y configuración de herramientas
 ├── references         <- Diccionarios de datos, manuales y material de consulta
 │   ├── manifiesto_datos.csv
 │   └── Propuesta_P3_Equipo52.docx
 ├── reports
-│   └── figures        <- Gráficas generadas para los reportes
+│   └── figures        <- Gráficas generadas para los reportes (prefijo p1_, p2_, p3_ según la pregunta)
 ├── requirements.txt   <- Paquetes con versión fija para reproducir el entorno
 │
 └── equipo52_module    <- Código del proyecto

@@ -14,6 +14,8 @@ Los días sin registros se conservan como NaN; no se asume que equivalen
 automáticamente a días con cero viajes.
 """
 
+import hashlib
+import subprocess
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -27,19 +29,33 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from equipo52_module.config import PROCESSED_DATA_DIR
+from equipo52_module.config import (
+    ESTACIONES_EXCLUIDAS,
+    FECHA_FIN,
+    FECHA_INICIO,
+    FIGURES_DIR,
+    MANIFIESTO_FILE,
+    MLFLOW_EXPERIMENT,
+    MLFLOW_TRACKING_URI,
+    PROJ_ROOT,
+    SEED,
+    VERSION_DATOS,
+    VIAJES_FILE,
+)
 
 
 # ---------------------------------------------------------------------
 # Configuración
 # ---------------------------------------------------------------------
 
-SEMILLA_P1 = 42  # Se conserva como referencia del proyecto; este flujo no usa aleatoriedad.
-URI_MLFLOW = "http://127.0.0.1:5000"
-EXPERIMENTO_MLFLOW = "MiBici-equipo52"
+# El experimento, el registro de MLflow y la semilla vienen de config.py para que P1 y P2
+# queden en un solo experimento del proyecto (punto 6 de la actividad).
+SEMILLA_P1 = SEED  # Se conserva como referencia del proyecto; este flujo no usa aleatoriedad.
+URI_MLFLOW = MLFLOW_TRACKING_URI
+EXPERIMENTO_MLFLOW = MLFLOW_EXPERIMENT
 FECHA_INICIO_PRUEBA = pd.Timestamp("2026-07-01")
 FECHA_FIN_PRUEBA = pd.Timestamp("2026-09-30")
-CARPETA_GRAFICAS = Path("graficas_p1")
+CARPETA_GRAFICAS = FIGURES_DIR  # reports/figures/, estructura de Cookiecutter; archivos con prefijo p1_
 
 VARIABLES_HISTORICAS = [
     "Viajes_dia_anterior",
@@ -60,12 +76,27 @@ VARIABLES_CICLICAS = [
 # 1. Carga y preparación de los datos
 # ---------------------------------------------------------------------
 
-def cargar_viajes_p1(ruta_archivo=None):
-    """Carga los viajes filtrados y valida el tipo de la fecha."""
-    if ruta_archivo is None:
-        ruta_archivo = PROCESSED_DATA_DIR / "viajes_p1_filtrados.parquet"
+def preparar_viajes_p1(ruta_viajes=VIAJES_FILE):
+    """Arma los viajes de P1 desde el Parquet de la ingesta, con los filtros del notebook de P1.
 
-    viajes = pd.read_parquet(ruta_archivo)
+    Conserva los viajes del periodo del proyecto (FECHA_INICIO a FECHA_FIN) y quita los que
+    salen o llegan a una de las 14 estaciones excluidas. Igual que el notebook 1.0-dh-p1, conserva
+    los viajes de menos de 1 minuto y los de mismo origen y destino, porque para P1 son inicios
+    de viaje registrados. Así el modelo corre con un solo comando, sin depender del notebook.
+    """
+    viajes = pd.read_parquet(ruta_viajes, columns=["Inicio_del_viaje", "Origen_Id", "Destino_Id"])
+    fin = pd.Timestamp(FECHA_FIN) + pd.Timedelta(days=1)
+    en_periodo = (viajes["Inicio_del_viaje"] >= pd.Timestamp(FECHA_INICIO)) & (viajes["Inicio_del_viaje"] < fin)
+    sin_excluidas = ~viajes["Origen_Id"].isin(ESTACIONES_EXCLUIDAS) & ~viajes["Destino_Id"].isin(ESTACIONES_EXCLUIDAS)
+    return viajes.loc[en_periodo & sin_excluidas, ["Inicio_del_viaje", "Origen_Id"]].reset_index(drop=True)
+
+
+def cargar_viajes_p1(ruta_archivo=None):
+    """Carga los viajes de P1 y valida el tipo de la fecha.
+
+    Sin ruta, los prepara desde el Parquet de la ingesta con preparar_viajes_p1().
+    """
+    viajes = preparar_viajes_p1() if ruta_archivo is None else pd.read_parquet(ruta_archivo)
     if "Inicio_del_viaje" not in viajes.columns or "Origen_Id" not in viajes.columns:
         raise ValueError(
             "El archivo debe contener las columnas 'Inicio_del_viaje' y 'Origen_Id'."
@@ -345,14 +376,36 @@ def configurar_mlflow():
     print("Experimento:", EXPERIMENTO_MLFLOW)
 
 
+def commit_actual():
+    """Commit de Git desde el que se ejecuta la corrida."""
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=PROJ_ROOT,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def parametros_comunes():
+    """Parámetros de reproducción que pide la actividad: fechas, versión de datos y semilla."""
+    return {
+        "fecha_inicio_entrenamiento": FECHA_INICIO,
+        "fecha_fin_prueba": str(FECHA_FIN_PRUEBA.date()),
+        "version_datos": VERSION_DATOS,
+        "huella_manifiesto": hashlib.sha256(MANIFIESTO_FILE.read_bytes()).hexdigest(),
+        "semilla": SEMILLA_P1,
+    }
+
+
 def registrar_resultado_mlflow(nombre_run, parametros, metricas, etiquetas=None,
                                modelo=None, ruta_grafica=None):
-    """Registra parámetros, métricas, etiquetas y artefactos de una ejecución."""
+    """Registra parámetros, métricas, etiquetas y artefactos de una ejecución.
+
+    Agrega los parámetros comunes, las etiquetas equipo, pregunta y commit, y nombra las métricas
+    con el conjunto de prueba (test_mae, test_rmse), como pide la rúbrica.
+    """
     with mlflow.start_run(run_name=nombre_run):
-        mlflow.log_params(parametros)
+        mlflow.log_params({**parametros_comunes(), **parametros})
         mlflow.log_metrics(
-            {nombre: float(valor) for nombre, valor in metricas.items()}
+            {f"test_{nombre.lower()}": float(valor) for nombre, valor in metricas.items()}
         )
+        mlflow.set_tags({"equipo": "52", "pregunta": "P1", "commit": commit_actual()})
         for clave, valor in (etiquetas or {}).items():
             mlflow.set_tag(clave, valor)
         if modelo is not None:
@@ -419,7 +472,7 @@ def entrenar_regresion_lineal(datos_entrenamiento, datos_prueba):
         y_test,
         predicciones,
         "Regresión lineal: demanda real vs. predicha en test",
-        "regresion_lineal_real_vs_predicho.png",
+        "p1_regresion_lineal_real_vs_predicho.png",
     )
 
     registrar_resultado_mlflow(
@@ -486,7 +539,7 @@ def entrenar_regresion_con_estacion(datos_entrenamiento, datos_prueba):
         y_test,
         predicciones,
         "Regresión lineal con estación: demanda real vs. predicha",
-        "regresion_estacion_real_vs_predicho.png",
+        "p1_regresion_estacion_real_vs_predicho.png",
     )
 
     registrar_resultado_mlflow(
@@ -529,7 +582,7 @@ def entrenar_regresion_ciclica(datos_entrenamiento, datos_prueba):
         y_test,
         predicciones,
         "Regresión cíclica: demanda real vs. predicha",
-        "regresion_ciclica_real_vs_predicho.png",
+        "p1_regresion_ciclica_real_vs_predicho.png",
     )
 
     registrar_resultado_mlflow(
@@ -721,7 +774,7 @@ def evaluar_pronostico_siete_dias(pronosticos, matriz_demanda):
     ax.legend()
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
-    ruta = CARPETA_GRAFICAS / "regresion_ciclica_evaluacion_7_dias.png"
+    ruta = CARPETA_GRAFICAS / "p1_regresion_ciclica_evaluacion_7_dias.png"
     fig.savefig(ruta, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
