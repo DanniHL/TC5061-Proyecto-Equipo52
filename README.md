@@ -49,6 +49,12 @@ La justificación está en los notebooks `1.0`, `1.1` y `1.2` de P2.
 
 **Corrida adicional de P2 (Post-Covid):** además del modelo con toda la historia, P2 entrena un segundo modelo solo con datos desde el 09/05/2023, fin de la emergencia sanitaria. Así se comprueba si entrenar con el comportamiento reciente de los usuarios permite anticipar mejor las estaciones en riesgo. Las dos corridas se registran en MLflow y se comparan con las mismas métricas. La evaluación de ambas incluye las 100 estaciones abiertas en 2026.
 
+### Criterios de P3 (viajes redondos y estaciones nuevas)
+
+- **Viajes menores a 1 minuto y viajes redondos (`Origen_Id == Destino_Id`):** se descartan los 1,269,425 viajes `< 60 s` (`DURACION_MINIMA_SEGUNDOS = 60`), de los cuales el 95.0 % salen y regresan al mismo puerto por falla inmediata al desanclar. En cambio, los 1,516,002 viajes con `Origen_Id == Destino_Id` que duran $\ge 60$ s (4.03 % de los viajes útiles) se conservan: el 75.9 % dura entre 5 y 30 min (mediana 12.1 min) y se concentra en fin de semana y domingo de Vía RecreActiva, por lo que su frecuencia por estación (`prop_viajes_redondos`) es una señal real de uso recreativo. En `features.py` se incluye además `quitar_viajes_redondos_cortos` (1 a 3 min) para comprobar que las devoluciones tardías no alteran los grupos (ARI = 1.000 en $k = 2$ y 0.924 en $k = 4$).
+- **Estaciones incorporadas recientemente (expansión 2026):** para que las 98 estaciones con viajes abiertas entre mayo y agosto de 2026 ($\le 6$ meses activas) compitan en igualdad con las 233 fundadoras ($> 96$ meses), ningún conteo crudo entra a la matriz de P3: todos los volúmenes se dividen entre los meses activos de cada estación (`salidas_por_mes`, `viajes_por_anclaje_mes`, `flujo_neto_por_mes`) y las firmas horaria y semanal se expresan como proporciones. Adicionalmente, `train_p3.py` incluye `--solo-consolidadas` para ajustar el escalador y los centroides solo con las 371 estaciones de $> 6$ meses y proyectar después las 98 nuevas.
+- La evidencia completa está en los notebooks `3.0-js-p3-exploracion-estaciones.ipynb` y `3.1-js-p3-agrupamiento.ipynb`.
+
 ## Instalación
 
 Requiere Python 3.12 y [uv](https://docs.astral.sh/uv/).
@@ -122,17 +128,19 @@ Requiere haber corrido la ingesta. Desde la carpeta del proyecto:
 python equipo52_module/modeling/train_p3.py --modelo geo
 python equipo52_module/modeling/train_p3.py --modelo kmeans
 python equipo52_module/modeling/train_p3.py --modelo kmeans --k 4
+python equipo52_module/modeling/train_p3.py --modelo kmeans --k 4 --solo-consolidadas
 python equipo52_module/modeling/train_p3.py --modelo ward
 python equipo52_module/modeling/train_p3.py --modelo hdbscan
 ```
 
-- `geo`: línea base. K-Means con k = 5 solo sobre latitud y longitud; su silueta se mide en el espacio de características de uso, para ver si las zonas geográficas también son coherentes en comportamiento.
-- `kmeans`: candidato principal. Describe cada estación con 42 características de uso (actividad por mes activo y por anclaje, firma horaria y semanal, balance de flujos, tipo de viaje y evolución) calculadas con toda la historia; elige k por silueta en el barrido 2-12, o fijo con `--k`.
-- `ward`: agrupamiento jerárquico con enlace Ward al mismo procedimiento de k; reporta el ARI de concordancia con K-Means y el dendrograma.
-- `hdbscan`: diagnóstico. Detecta núcleos densos y marca como ruido las estaciones que no comparten patrón con ningún grupo (`--min-cluster-size`, 15 por omisión).
-- Para los candidatos se reporta la estabilidad: `estabilidad_eras_ari` compara la asignación entre dos eras de la historia (corte 2020-09) y `estabilidad_bootstrap_ari` re-entrena con remuestreos del 80 % de las estaciones.
+- `geo`: línea base. K-Means con k = 5 solo sobre latitud y longitud; su silueta se mide en el espacio de las 42 características de uso (`hist_silhouette = 0.019`), para comprobar si las zonas geográficas son coherentes en comportamiento.
+- `kmeans`: candidato principal sobre las 469 estaciones activas y 42 características de uso calculadas con toda la historia; elige k por silueta en el barrido 2-12 (`k = 2`, `hist_silhouette = 0.151`, 8× la línea base) o fijo con `--k 4` para obtener los 4 perfiles operativos de planeación (`hist_silhouette = 0.105`).
+- `--solo-consolidadas`: ajusta el escalador y los centroides únicamente con las 371 estaciones consolidadas ($> 6$ meses activas, `consolidadas_silhouette = 0.127` en $k = 4$) y asigna las 98 estaciones abiertas en 2026 al centroide más cercano; `--sin-redondos-cortos` descarta viajes `Origen_Id == Destino_Id` de 1 a 3 min.
+- `ward`: agrupamiento jerárquico con enlace Ward al mismo procedimiento de k (`hist_silhouette = 0.129`); reporta el ARI de concordancia con K-Means (`0.565`) y el dendrograma.
+- `hdbscan`: diagnóstico de densidad (`--min-cluster-size`, 15 por omisión). Muestra que las estaciones forman un continuo urbano y no islas aisladas, e identifica las estaciones más atípicas.
+- Para los candidatos se reporta la estabilidad: `estabilidad_eras_ari` compara la asignación de las 274 estaciones activas en ambas mitades de la historia (corte `2020-09-01`, ARI = `0.618` en $k = 2$ y `0.571` en $k = 4$) y `estabilidad_bootstrap_ari` re-entrena 30 veces con el 80 % de las estaciones (ARI = `0.952` en $k = 2$ y `0.841` en $k = 4$).
 
-Cada corrida se registra en `mibici-equipo52` con fechas, versión y huella de datos, semilla, hiperparámetros, métricas `hist_*` y de estabilidad, etiquetas (equipo, pregunta, commit) y artefactos (mapa de grupos, perfiles horarios, silueta por k, dendrograma, matriz estación × característica y descripción de grupos). La matriz y las descripciones quedan en `data/processed/` y las figuras en `reports/figures/`.
+Cada corrida se registra en `mibici-equipo52` con fechas, versión y huella de datos, semilla, hiperparámetros, métricas `hist_*` y de estabilidad, etiquetas (equipo, pregunta, commit) y artefactos (mapa de grupos, perfiles horarios, silueta por k, dendrograma, matriz estación × característica y descripción de grupos con desglose por municipio `GDL`/`ZPN`/`TLQ`). La matriz y las descripciones quedan en `data/processed/` y las figuras en `reports/figures/`.
 
 ### Ver los experimentos
 
@@ -141,8 +149,6 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db
 ```
 
 Abrir http://127.0.0.1:5000.
-
-Pendiente: los comandos de P3 se agregan cuando sus scripts se unan a `main`.
 
 ## Forma de trabajo en Git
 
@@ -172,18 +178,19 @@ Pendiente: los comandos de P3 se agregan cuando sus scripts se unan a `main`.
     └── 1.0-rr-p2-exploracion-datos.ipynb
     └── 1.1-rr-p2-exploracion-estaciones.ipynb
     └── 1.2-rr-p2-exploracion-flujo-neto.ipynb
-    └── *****Joel
-    └── *****Joel
-    └── graficas_p1
-        ├── regresion_ciclica_evaluacion_7_dias.png
-        ├── regresion_ciclica_real_vs_predicho.png
-        ├── regresion_estacion_real_vs_predicho.png
-        └── regresion_lineal_real_vs_predicho.png
-    
+    └── 3.0-js-p3-exploracion-estaciones.ipynb
+    └── 3.1-js-p3-agrupamiento.ipynb
+
+├── graficas_p1        <- Gráficas de evaluación de los modelos de P1
+│   ├── regresion_ciclica_evaluacion_7_dias.png
+│   ├── regresion_ciclica_real_vs_predicho.png
+│   ├── regresion_estacion_real_vs_predicho.png
+│   └── regresion_lineal_real_vs_predicho.png
+
 ├── pyproject.toml     <- Datos del paquete equipo52_module y configuración de herramientas
 ├── references         <- Diccionarios de datos, manuales y material de consulta
-    └── .gitkeep
-    └── manifiesto_datos.csv
+│   ├── manifiesto_datos.csv
+│   └── Propuesta_P3_Equipo52.docx
 ├── reports
 │   └── figures        <- Gráficas generadas para los reportes
 ├── requirements.txt   <- Paquetes con versión fija para reproducir el entorno

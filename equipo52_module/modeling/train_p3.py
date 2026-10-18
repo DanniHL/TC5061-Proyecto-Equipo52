@@ -8,7 +8,8 @@ agrupan y se registran parámetros, métricas y artefactos en MLflow.
 Uso:
     python equipo52_module/modeling/train_p3.py --modelo geo
     python equipo52_module/modeling/train_p3.py --modelo kmeans
-    python equipo52_module/modeling/train_p3.py --modelo kmeans --k 6
+    python equipo52_module/modeling/train_p3.py --modelo kmeans --k 4
+    python equipo52_module/modeling/train_p3.py --modelo kmeans --k 4 --solo-consolidadas
     python equipo52_module/modeling/train_p3.py --modelo ward
     python equipo52_module/modeling/train_p3.py --modelo hdbscan
 """
@@ -55,7 +56,12 @@ from equipo52_module.config import (
     VERSION_DATOS,
     VIAJES_FILE,
 )
-from equipo52_module.features import construir_matriz_p3, quitar_viajes_cortos
+from equipo52_module.features import (
+    SEGUNDOS_REDONDO_CORTO,
+    construir_matriz_p3,
+    quitar_viajes_cortos,
+    quitar_viajes_redondos_cortos,
+)
 
 app = typer.Typer()
 
@@ -71,17 +77,19 @@ REPETICIONES_BOOTSTRAP = 30   # remuestreos de estaciones para la estabilidad bo
 PROPORCION_BOOTSTRAP = 0.8
 MIN_CLUSTER_SIZE_HDBSCAN = 15  # estaciones mínimas para que HDBSCAN considere un grupo
 CORTE_ERAS = "2020-09-01"      # era A: 2014-12 a 2020-08 · era B: 2020-09 a 2026-09
+MESES_ESTACION_CONSOLIDADA = 6  # separa las 98 estaciones abiertas en may-ago 2026 del resto
 
 # Tipos internos del modelo que MLflow declara confiables al guardarlo con skops.
 TIPOS_CONFIABLES = ["sklearn.cluster._kmeans.KMeans"]
 
 
 def cargar_estaciones(ruta: Path, excluidas: list[int]) -> pd.DataFrame:
-    """Lee capacidad y ubicación de la nomenclatura, sin las estaciones excluidas ni las de capacidad 0."""
+    """Lee capacidad, ubicación y municipio de la nomenclatura, sin excluidas ni capacidad 0."""
     nomenclatura = pd.read_csv(ruta).rename(columns={"id": "estacion_id", "dpcapacity": "capacidad",
                                                      "latitude": "latitud", "longitude": "longitud"})
     nomenclatura = nomenclatura[~nomenclatura["estacion_id"].isin(excluidas) & (nomenclatura["capacidad"] > 0)]
-    return nomenclatura.set_index("estacion_id")[["capacidad", "latitud", "longitud"]]
+    nomenclatura["municipio"] = nomenclatura["name"].str.extract(r"\(([A-Z]+)-\d+\)")[0].fillna("OTRO")
+    return nomenclatura.set_index("estacion_id")[["name", "municipio", "capacidad", "latitud", "longitud"]]
 
 
 def barrer_k(X: pd.DataFrame, algoritmo: str) -> pd.DataFrame:
@@ -147,16 +155,25 @@ def estabilidad_bootstrap(X: pd.DataFrame, etiquetas_base: np.ndarray, k: int) -
     return float(np.mean(aris))
 
 
-def describir_grupos(matriz: pd.DataFrame, etiquetas: np.ndarray) -> pd.DataFrame:
-    """Resumen en lenguaje de negocio de cada grupo: tamaño y promedios interpretables."""
+def describir_grupos(matriz: pd.DataFrame, etiquetas: np.ndarray,
+                     estaciones: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Resumen cuantitativo y geográfico de cada grupo: uso, horarios y ubicación municipal."""
     columnas = ["salidas_por_mes", "viajes_por_anclaje_mes", "balance", "flujo_neto_por_mes",
                 "prop_viajes_redondos", "duracion_mediana_min", "meses_activa",
                 "share_viajes_ultimos_12m", "crecimiento_vs_esperado"]
-    descripcion = matriz.assign(grupo=etiquetas).groupby("grupo")[columnas].mean().round(3)
-    descripcion["fin_de_semana"] = matriz.assign(grupo=etiquetas).groupby("grupo")[["d5", "d6"]].mean().sum(axis=1)
+    con_grupo = matriz.assign(grupo=etiquetas)
+    descripcion = con_grupo.groupby("grupo")[columnas].mean().round(3)
+    descripcion["fin_de_semana"] = con_grupo.groupby("grupo")[["d5", "d6"]].mean().sum(axis=1).round(3)
+    descripcion["pico_manana_07_09"] = con_grupo.groupby("grupo")[["h07", "h08", "h09"]].mean().sum(axis=1).round(3)
+    descripcion["pico_tarde_17_19"] = con_grupo.groupby("grupo")[["h17", "h18", "h19"]].mean().sum(axis=1).round(3)
     descripcion["estaciones"] = np.bincount(etiquetas[etiquetas >= 0])
-    horas = matriz.assign(grupo=etiquetas).groupby("grupo")[[f"h{h:02d}" for h in range(24)]].mean()
+    descripcion["nuevas_2026"] = con_grupo.groupby("grupo")["meses_activa"].apply(lambda s: int((s <= MESES_ESTACION_CONSOLIDADA).sum()))
+    horas = con_grupo.groupby("grupo")[[f"h{h:02d}" for h in range(24)]].mean()
     descripcion["hora_pico"] = horas.idxmax(axis=1).str[1:].astype(int)
+    if estaciones is not None and "municipio" in estaciones.columns:
+        mun = con_grupo.join(estaciones[["municipio"]])
+        for m_cod in ["GDL", "ZPN", "TLQ"]:
+            descripcion[f"est_{m_cod}"] = mun.groupby("grupo")["municipio"].apply(lambda s, c=m_cod: int((s == c).sum()))
     return descripcion.sort_index()
 
 
@@ -230,23 +247,34 @@ def commit_actual() -> str:
 def main(modelo: str = typer.Option("kmeans", help="geo, kmeans, ward o hdbscan"),
          k: int = typer.Option(0, help="número de grupos; 0 = elegir por silueta"),
          min_cluster_size: int = typer.Option(MIN_CLUSTER_SIZE_HDBSCAN,
-                                              help="tamaño mínimo de grupo para hdbscan")):
+                                              help="tamaño mínimo de grupo para hdbscan"),
+         solo_consolidadas: bool = typer.Option(
+             False,
+             help="ajustar el escalador y los centroides solo con estaciones > 6 meses y proyectar las de 2026"),
+         sin_redondos_cortos: bool = typer.Option(
+             False,
+             help="descartar viajes origen=destino de menos de 3 min (devoluciones tardías)")):
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
     logger.info(f"P3 · modelo {modelo} · periodo {FECHA_INICIO} a {FECHA_FIN}")
 
     viajes = pd.read_parquet(VIAJES_FILE)
     viajes = quitar_viajes_cortos(viajes, DURACION_MINIMA_SEGUNDOS)
+    if sin_redondos_cortos:
+        viajes = quitar_viajes_redondos_cortos(viajes, SEGUNDOS_REDONDO_CORTO)
     estaciones = cargar_estaciones(NOMENCLATURA_FILE, ESTACIONES_EXCLUIDAS)
     matriz = construir_matriz_p3(viajes, estaciones, pd.Timestamp(FECHA_FIN))
     logger.info(f"Matriz estación × característica: {matriz.shape[0]} estaciones × "
                 f"{matriz.shape[1] - len(GEO)} características")
 
     columnas = [c for c in matriz.columns if c not in GEO]
-    escalador = StandardScaler().fit(matriz[columnas])
+    mascara_consolidadas = matriz["meses_activa"] > MESES_ESTACION_CONSOLIDADA
+    base_ajuste = matriz.loc[mascara_consolidadas, columnas] if solo_consolidadas else matriz[columnas]
+    escalador = StandardScaler().fit(base_ajuste)
     # X es DataFrame para que el modelo guarde los nombres de las características y MLflow
     # pueda registrar la firma con un ejemplo de entrada real.
     X = pd.DataFrame(escalador.transform(matriz[columnas]), columns=columnas, index=matriz.index)
+    X_ajuste = X.loc[mascara_consolidadas] if solo_consolidadas else X
 
     parametros = {
         "pregunta": "P3", "modelo": modelo,
@@ -254,7 +282,11 @@ def main(modelo: str = typer.Option("kmeans", help="geo, kmeans, ward o hdbscan"
         "version_datos": VERSION_DATOS, "huella_manifiesto": huella_manifiesto(MANIFIESTO_FILE),
         "semilla": SEED, "estaciones_excluidas": len(ESTACIONES_EXCLUIDAS),
         "duracion_minima_segundos": DURACION_MINIMA_SEGUNDOS,
-        "n_estaciones": int(matriz.shape[0]), "n_caracteristicas": len(columnas),
+        "sin_redondos_cortos": sin_redondos_cortos,
+        "solo_consolidadas": solo_consolidadas,
+        "n_estaciones": int(matriz.shape[0]),
+        "n_estaciones_ajuste": int(len(X_ajuste)),
+        "n_caracteristicas": len(columnas),
         "grupos_caracteristicas": GRUPOS_CARACTERISTICAS, "corte_eras": CORTE_ERAS,
     }
     metricas, artefactos = {}, {}
@@ -280,22 +312,25 @@ def main(modelo: str = typer.Option("kmeans", help="geo, kmeans, ward o hdbscan"
             lambda ruta: figura_mapa(matriz, etiquetas, "Línea base: grupos por ubicación", ruta))
 
     elif modelo == "kmeans":
-        barrido = barrer_k(X, "kmeans")
+        barrido = barrer_k(X_ajuste, "kmeans")
         k_elegido = k or int(barrido.loc[barrido["silueta"].idxmax(), "k"])
-        modelo_entrenado = KMeans(n_clusters=k_elegido, n_init=N_INIT, random_state=SEED).fit(X)
-        etiquetas = modelo_entrenado.labels_
+        modelo_entrenado = KMeans(n_clusters=k_elegido, n_init=N_INIT, random_state=SEED).fit(X_ajuste)
+        etiquetas = modelo_entrenado.predict(X) if solo_consolidadas else modelo_entrenado.labels_
         parametros.update({"k": k_elegido, "k_elegido_por": "manual" if k else "silueta",
                            "kmeans_n_init": N_INIT, "caracteristicas_modelo": "grupos A-F",
                            "repeticiones_bootstrap": REPETICIONES_BOOTSTRAP})
         metricas.update(metricas_internas(X, etiquetas))
+        if solo_consolidadas:
+            metricas.update(metricas_internas(X_ajuste, modelo_entrenado.labels_, prefijo="consolidadas"))
         logger.info("Calculando estabilidad entre eras y por remuestreo (tarda unos minutos)...")
         metricas["estabilidad_eras_ari"] = estabilidad_entre_eras(viajes, estaciones, escalador,
                                                                 modelo_entrenado, columnas)
-        metricas["estabilidad_bootstrap_ari"] = estabilidad_bootstrap(X, etiquetas, k_elegido)
-        artefactos["p3_silueta_vs_k.png"] = lambda ruta: figura_silueta(barrido, ruta)
-        artefactos["p3_mapa_clusters_kmeans.png"] = (
+        metricas["estabilidad_bootstrap_ari"] = estabilidad_bootstrap(X_ajuste, modelo_entrenado.labels_, k_elegido)
+        sufijo = "_consolidadas" if solo_consolidadas else ""
+        artefactos[f"p3_silueta_vs_k{sufijo}.png"] = lambda ruta: figura_silueta(barrido, ruta)
+        artefactos[f"p3_mapa_clusters_kmeans{sufijo}.png"] = (
             lambda ruta: figura_mapa(matriz, etiquetas, f"Grupos K-Means (k = {k_elegido})", ruta))
-        artefactos["p3_perfiles_horarios.png"] = (
+        artefactos[f"p3_perfiles_horarios{sufijo}.png"] = (
             lambda ruta: figura_perfiles(matriz, etiquetas, ruta))
 
     elif modelo == "ward":
@@ -337,6 +372,10 @@ def main(modelo: str = typer.Option("kmeans", help="geo, kmeans, ward o hdbscan"
     nombre_corrida = f"p3-{modelo}" + (f"-k{parametros.get('k')}" if "k" in parametros else "")
     if modelo == "hdbscan":
         nombre_corrida += f"-mcs{min_cluster_size}"
+    if solo_consolidadas:
+        nombre_corrida += "-consolidadas"
+    if sin_redondos_cortos:
+        nombre_corrida += "-sin-redondos-cortos"
     with mlflow.start_run(run_name=nombre_corrida):
         mlflow.set_tags({"equipo": "52", "pregunta": "P3", "commit": commit_actual()})
         mlflow.log_params(parametros)
@@ -350,7 +389,7 @@ def main(modelo: str = typer.Option("kmeans", help="geo, kmeans, ward o hdbscan"
             salida.to_csv(PROCESSED_DATA_DIR / f"p3_matriz_{modelo}.csv")
             mlflow.log_artifact(str(PROCESSED_DATA_DIR / f"p3_matriz_{modelo}.csv"))
             if modelo in ("kmeans", "ward"):
-                descripcion = describir_grupos(matriz, etiquetas)
+                descripcion = describir_grupos(matriz, etiquetas, estaciones)
                 descripcion.to_csv(PROCESSED_DATA_DIR / f"p3_descripcion_grupos_{modelo}.csv")
                 mlflow.log_artifact(str(PROCESSED_DATA_DIR / f"p3_descripcion_grupos_{modelo}.csv"))
             if modelo == "hdbscan":

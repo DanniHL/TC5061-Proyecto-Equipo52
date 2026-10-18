@@ -152,6 +152,22 @@ def construir_tabla_p2(viajes: pd.DataFrame, estaciones: pd.DataFrame, horas: in
 # las firmas temporales son proporciones: así una estación nueva compite parejo con una de 2014.
 
 INICIO_POSTCOVID = pd.Timestamp("2023-05-09")  # fin de la emergencia sanitaria (misma fecha que P2)
+SEGUNDOS_REDONDO_CORTO = 180  # umbral para separar devolución tardía (1-3 min) de paseo redondo real
+
+
+def quitar_viajes_redondos_cortos(viajes: pd.DataFrame,
+                                  segundos_maximos: int = SEGUNDOS_REDONDO_CORTO) -> pd.DataFrame:
+    """Descarta viajes con Origen_Id == Destino_Id que duran menos de 'segundos_maximos'.
+
+    Tras quitar los viajes < 60 s (el 95.0 % son devoluciones inmediatas en el mismo anclaje),
+    quedan 1.52 M de viajes con origen = destino: el 75.9 % dura entre 5 y 30 min y se concentra
+    en domingo (Vía RecreActiva y paseos), pero un 9.7 % dura entre 1 y 3 min (usuario que
+    prueba la bicicleta una cuadra y la devuelve por falla). Esta función permite filtrarlos
+    sin perder los viajes redondos recreativos genuinos.
+    """
+    duracion = (viajes["Fin_del_viaje"] - viajes["Inicio_del_viaje"]).dt.total_seconds()
+    es_redondo_corto = (viajes["Origen_Id"] == viajes["Destino_Id"]) & (duracion < segundos_maximos)
+    return viajes[~es_redondo_corto].reset_index(drop=True)
 
 
 def meses_entre(inicio: pd.Series, fin: pd.Timestamp) -> pd.Series:
