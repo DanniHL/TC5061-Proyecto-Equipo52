@@ -140,3 +140,188 @@ def construir_tabla_p2(viajes: pd.DataFrame, estaciones: pd.DataFrame, horas: in
     por_hora = agregar_movimientos_previos(por_hora)
     por_hora = agregar_historial_semanas(por_hora, semanas)
     return por_hora.join(estaciones, on="estacion_id")
+
+
+# =====================================================================================
+# P3 · Grupos de estaciones con patrones de uso similares
+# =====================================================================================
+#
+# Cada estación se describe con características calculadas solo con los viajes que recibe
+# 'construir_matriz_p3'. Como las estaciones no llevan el mismo tiempo en el sistema (14 se
+# dieron de baja y 100 abrieron en 2026), los conteos se dividen entre sus meses activos y
+# las firmas temporales son proporciones: así una estación nueva compite parejo con una de 2014.
+
+INICIO_POSTCOVID = pd.Timestamp("2023-05-09")  # fin de la emergencia sanitaria (misma fecha que P2)
+SEGUNDOS_REDONDO_CORTO = 180  # umbral para separar devolución tardía (1-3 min) de paseo redondo real
+
+
+def quitar_viajes_redondos_cortos(viajes: pd.DataFrame,
+                                  segundos_maximos: int = SEGUNDOS_REDONDO_CORTO) -> pd.DataFrame:
+    """Descarta viajes con Origen_Id == Destino_Id que duran menos de 'segundos_maximos'.
+
+    Tras quitar los viajes < 60 s (el 95.0 % son devoluciones inmediatas en el mismo anclaje),
+    quedan 1.52 M de viajes con origen = destino: el 75.9 % dura entre 5 y 30 min y se concentra
+    en domingo (Vía RecreActiva y paseos), pero un 9.7 % dura entre 1 y 3 min (usuario que
+    prueba la bicicleta una cuadra y la devuelve por falla). Esta función permite filtrarlos
+    sin perder los viajes redondos recreativos genuinos.
+    """
+    duracion = (viajes["Fin_del_viaje"] - viajes["Inicio_del_viaje"]).dt.total_seconds()
+    es_redondo_corto = (viajes["Origen_Id"] == viajes["Destino_Id"]) & (duracion < segundos_maximos)
+    return viajes[~es_redondo_corto].reset_index(drop=True)
+
+
+def meses_entre(inicio: pd.Series, fin: pd.Timestamp) -> pd.Series:
+    """Meses calendario desde cada fecha de 'inicio' hasta 'fin', inclusive."""
+    return (fin.year - inicio.dt.year) * 12 + (fin.month - inicio.dt.month) + 1
+
+
+def primer_viaje_por_estacion(viajes: pd.DataFrame) -> pd.Series:
+    """Primer viaje observado de cada estación, como origen o como destino.
+
+    Una estación 'nace' cuando registra su primer viaje; mirar ambos lados evita que una
+    estación parezca más vieja o más nueva por el orden en que se usó.
+    """
+    primera_salida = viajes.groupby("Origen_Id")["Inicio_del_viaje"].min()
+    primera_llegada = viajes.groupby("Destino_Id")["Fin_del_viaje"].min()
+    return pd.concat([primera_salida, primera_llegada], axis=1).min(axis=1)
+
+
+def nivel_de_actividad(viajes: pd.DataFrame, meses_activa: pd.Series,
+                        capacidad: pd.Series) -> pd.DataFrame:
+    """Salidas y llegadas por mes activo, y viajes por anclaje por mes activo.
+
+    Separa estaciones centrales de las de bajo uso. Dividir entre meses activos y entre la
+    capacidad distingue saturación real de simple tamaño: una estación nueva con pocos viajes
+    totales puede ser muy intensa por anclaje.
+    """
+    salidas = viajes.groupby("Origen_Id").size()
+    llegadas = viajes.groupby("Destino_Id").size()
+    tabla = pd.DataFrame({
+        "salidas_por_mes": salidas / meses_activa,
+        "llegadas_por_mes": llegadas / meses_activa,
+    })
+    tabla["viajes_por_anclaje_mes"] = (salidas.add(llegadas, fill_value=0)
+                                     / meses_activa / capacidad)
+    return tabla
+
+
+def firma_horaria(viajes: pd.DataFrame) -> pd.DataFrame:
+    """Proporción de las salidas de cada estación en cada hora del día (columnas h00 a h23).
+
+    Es la huella digital de uso de la estación: picos de 7-9 h y 17-19 h describen uso
+    laboral o escolar; una distribución plana o nocturna describe otros perfiles. Al ser
+    proporciones no depende del volumen ni de la antigüedad de la estación.
+    """
+    conteo = pd.crosstab(viajes["Origen_Id"].to_numpy(),
+                         viajes["Inicio_del_viaje"].dt.hour.to_numpy())
+    conteo = conteo.reindex(columns=range(24), fill_value=0)
+    proporciones = conteo.div(conteo.sum(axis=1), axis=0)
+    proporciones.columns = [f"h{hora:02d}" for hora in range(24)]
+    return proporciones
+
+
+def firma_semanal(viajes: pd.DataFrame) -> pd.DataFrame:
+    """Proporción de las salidas de cada estación en cada día de la semana (columnas d0 a d6).
+
+    El uso recreativo se concentra en sábado (d5) y domingo (d6); el laboral y escolar, de
+    lunes a viernes. Complementa la firma horaria, que no distingue entre días.
+    """
+    conteo = pd.crosstab(viajes["Origen_Id"].to_numpy(),
+                         viajes["Inicio_del_viaje"].dt.dayofweek.to_numpy())
+    conteo = conteo.reindex(columns=range(7), fill_value=0)
+    proporciones = conteo.div(conteo.sum(axis=1), axis=0)
+    proporciones.columns = [f"d{dia}" for dia in range(7)]
+    return proporciones
+
+
+def rol_en_la_red(viajes: pd.DataFrame, meses_activa: pd.Series) -> pd.DataFrame:
+    """Flujo neto por mes, balance y diversidad de destinos de cada estación.
+
+    flujo_neto_por_mes = llegadas − salidas por mes activo: magnitud del papel de la estación
+    como sumidero (+) o fuente (−) de bicicletas. balance = (llegadas − salidas) / total,
+    acotado en [-1, 1]: la dirección del papel sin importar el tamaño. num_destinos = estaciones
+    distintas a las que salen viajes: distingue estaciones conectoras de las de un solo corredor.
+    """
+    salidas = viajes.groupby("Origen_Id").size()
+    llegadas = viajes.groupby("Destino_Id").size()
+    total = salidas.add(llegadas, fill_value=0)
+    destinos = viajes.groupby("Origen_Id")["Destino_Id"].nunique()
+    return pd.DataFrame({
+        "flujo_neto_por_mes": (llegadas.reindex(total.index, fill_value=0)
+                             .sub(salidas.reindex(total.index, fill_value=0))) / meses_activa,
+        "balance": (llegadas.reindex(total.index, fill_value=0)
+                    .sub(salidas.reindex(total.index, fill_value=0))) / total,
+        "num_destinos": destinos,
+    })
+
+
+def tipo_de_viaje(viajes: pd.DataFrame) -> pd.DataFrame:
+    """Proporción de viajes redondos y duración mediana de los viajes que inician en la estación.
+
+    Los viajes que regresan a la misma estación y los viajes largos sugieren uso recreativo
+    (parques, ciclovía dominical); los viajes cortos de ida, uso utilitario.
+    """
+    redondos = viajes["Origen_Id"] == viajes["Destino_Id"]
+    duracion_min = (viajes["Fin_del_viaje"] - viajes["Inicio_del_viaje"]).dt.total_seconds() / 60
+    return pd.DataFrame({
+        "prop_viajes_redondos": redondos.groupby(viajes["Origen_Id"]).mean(),
+        "duracion_mediana_min": duracion_min.groupby(viajes["Origen_Id"]).median(),
+    })
+
+
+def evolucion_historica(viajes: pd.DataFrame, primer_viaje: pd.Series, meses_activa: pd.Series,
+                        fin: pd.Timestamp) -> pd.DataFrame:
+    """Antigüedad, proporción de actividad reciente y crecimiento respecto a lo esperado.
+
+    Solo existen gracias a la historia completa: distinguen estaciones nuevas, en crecimiento,
+    maduras o en declive aunque hoy tengan el mismo volumen. 'crecimiento_vs_esperado' compara
+    la proporción de viajes post-COVID con la que le tocaría a la estación por el tiempo que
+    lleva activa: positivo = creció, negativo = declinó, cero = estable (incluidas las nuevas).
+    """
+    inicio_12m = fin - pd.DateOffset(months=12)
+    salidas = viajes.groupby("Origen_Id").size()
+    salidas_12m = viajes[viajes["Inicio_del_viaje"] >= inicio_12m].groupby("Origen_Id").size()
+    salidas_post = viajes[viajes["Inicio_del_viaje"] >= INICIO_POSTCOVID].groupby("Origen_Id").size()
+
+    share_12m = (salidas_12m / salidas).reindex(meses_activa.index, fill_value=0)
+    share_post = (salidas_post / salidas).reindex(meses_activa.index, fill_value=0)
+    inicio_post = primer_viaje.clip(lower=INICIO_POSTCOVID)
+    meses_post = meses_entre(inicio_post, fin).clip(upper=meses_activa)
+    share_esperado = meses_post / meses_activa
+    return pd.DataFrame({
+        "meses_activa": meses_activa,
+        "share_viajes_ultimos_12m": share_12m.fillna(0.0),
+        "crecimiento_vs_esperado": (share_post - share_esperado).fillna(0.0),
+    })
+
+
+def construir_matriz_p3(viajes: pd.DataFrame, estaciones: pd.DataFrame,
+                        fin: pd.Timestamp) -> pd.DataFrame:
+    """Arma la matriz estación × característica de P3.
+
+    'estaciones' trae capacidad, latitud y longitud indexadas por número de estación; las
+    estaciones que no están ahí (excluidas o sin ficha en la nomenclatura) quedan fuera, y
+    las que no tienen ningún viaje en el periodo también (no hay patrón que describir).
+    'fin' es el cierre del periodo sobre el que se calculan los meses activos: la matriz de
+    una era del pasado se calcula con el fin de esa era, no con el de hoy.
+    """
+    viajes = viajes[viajes["Origen_Id"].isin(estaciones.index)
+                    & viajes["Destino_Id"].isin(estaciones.index)].reset_index(drop=True)
+    primer_viaje = primer_viaje_por_estacion(viajes)
+    meses_activa = meses_entre(primer_viaje, fin)
+    matriz = pd.concat([
+        nivel_de_actividad(viajes, meses_activa, estaciones["capacidad"]),
+        firma_horaria(viajes),
+        firma_semanal(viajes),
+        rol_en_la_red(viajes, meses_activa),
+        tipo_de_viaje(viajes),
+        evolucion_historica(viajes, primer_viaje, meses_activa, fin),
+    ], axis=1)
+    matriz = matriz.reindex(primer_viaje.index).dropna(how="all")
+    # Una estación solo con llegadas deja NaN en las características de salidas: se rellenan con 0
+    # (no hay viajes de ese tipo) y la duración con la mediana global (0 minutos sería una señal falsa).
+    mediana_duracion = matriz["duracion_mediana_min"].median()
+    matriz["duracion_mediana_min"] = matriz["duracion_mediana_min"].fillna(mediana_duracion)
+    matriz = matriz.fillna(0)
+    matriz.index.name = "estacion_id"
+    return matriz.join(estaciones[["latitud", "longitud"]])

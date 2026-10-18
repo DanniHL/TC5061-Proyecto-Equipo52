@@ -209,3 +209,6 @@ venv/
 *.bak
 requirements_backup.txt
 .venv312/
+
+# Copia local de los CSV de MiBici (los datos no se versionan; se obtienen con dataset.py)
+/project_Data/
