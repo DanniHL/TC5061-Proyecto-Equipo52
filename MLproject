@@ -1,0 +1,45 @@
+
+name: mibici-equipo52
+
+python_env: python_env.yaml
+
+entry_points:
+  ingest:
+    command: "python -m equipo52_module.dataset"
+
+  train:
+    parameters:
+      pregunta:
+        type: string
+        default: p1
+      modelo:
+        type: string
+        default: ""
+      periodo:
+        type: string
+        default: ""
+      balanceado:
+        type: string
+        default: "false"
+      k:
+        type: int
+        default: 0
+      min_cluster_size:
+        type: int
+        default: 0
+      solo_consolidadas:
+        type: string
+        default: "false"
+      sin_redondos_cortos:
+        type: string
+        default: "false"
+    command: >-
+      python -m equipo52_module.project_train
+      --pregunta {pregunta}
+      --modelo {modelo}
+      --periodo {periodo}
+      --balanceado {balanceado}
+      --k {k}
+      --min-cluster-size {min_cluster_size}
+      --solo-consolidadas {solo_consolidadas}
+      --sin-redondos-cortos {sin_redondos_cortos}

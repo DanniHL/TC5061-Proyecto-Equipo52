@@ -142,13 +142,20 @@ python equipo52_module/modeling/train_p3.py --modelo hdbscan
 
 Cada corrida se registra en `mibici-equipo52` con fechas, versión y huella de datos, semilla, hiperparámetros, métricas `hist_*` y de estabilidad, etiquetas (equipo, pregunta, commit) y artefactos (mapa de grupos, perfiles horarios, silueta por k, dendrograma, matriz estación × característica y descripción de grupos con desglose por municipio `GDL`/`ZPN`/`TLQ`). La matriz y las descripciones quedan en `data/processed/` y las figuras en `reports/figures/`.
 
-### Ver los experimentos
+
+### Ver los experimentos en MLflow
+
+Para registrar y consultar los experimentos, inicia el servidor local desde la raíz del proyecto y con el entorno virtual activado:
 
 ```bash
-mlflow ui --backend-store-uri sqlite:///mlflow.db
+mlflow server --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
 ```
 
-Abrir http://127.0.0.1:5000.
+Mantén la terminal abierta mientras ejecutas los entrenamientos. El servidor utiliza `mlflow.db` como base de datos de seguimiento y expone la interfaz web en:
+
+http://127.0.0.1:5000
+
+Los scripts de entrenamiento utilizan la variable `MLFLOW_TRACKING_URI`, configurada por defecto como `http://127.0.0.1:5000`. Así, P1, P2 y P3 registran sus experimentos en el mismo servidor local.
 
 ## Forma de trabajo en Git
 
