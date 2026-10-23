@@ -2,6 +2,7 @@
 import argparse
 import subprocess
 import sys
+import os
 from pathlib import Path
 
 
@@ -100,11 +101,9 @@ def main() -> None:
     args = parser.parse_args()
     comando = construir_comando(args)
 
-    subprocess.run(
-        comando,
-        cwd=PROJ_ROOT,
-        check=True,
-    )
+    entorno = os.environ.copy()
+    entorno.pop("MLFLOW_RUN_ID", None)
+    subprocess.run(comando, cwd=PROJ_ROOT, check=True, env=entorno)
 
 
 if __name__ == "__main__":
