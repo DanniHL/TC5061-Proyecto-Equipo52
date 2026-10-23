@@ -2,7 +2,8 @@
 
 Pregunta: ¿Una estación estará en riesgo de quedarse sin bicicletas o sin anclajes libres en
 las próximas 3 horas? Cada corrida entrena con un periodo (historia completa o Post-Covid),
-evalúa con abril a septiembre de 2026 y registra parámetros, métricas y artefactos en MLflow.
+se valida con octubre de 2025 a marzo de 2026, se prueba con abril a septiembre de 2026 y
+registra parámetros, métricas y artefactos en MLflow.
 
 Uso:
     python equipo52_module/modeling/train_p2.py --modelo base --periodo completo
@@ -32,6 +33,7 @@ from equipo52_module.config import (
     ESTACIONES_EXCLUIDAS,
     FECHA_FIN,
     FECHA_INICIO,
+    INICIO_POSTCOVID,
     MANIFIESTO_FILE,
     MLFLOW_EXPERIMENT,
     MLFLOW_TRACKING_URI,
@@ -60,10 +62,14 @@ SEMANAS_HISTORIAL = 4
 
 # Partición en el tiempo: se entrena con lo anterior y se prueba con meses que el modelo no vio.
 # La prueba incluye las 100 estaciones abiertas de mayo a agosto de 2026 (acuerdo del equipo).
+# Validación: los 6 meses previos a la prueba (mismo largo). Sirve para elegir modelo e
+# hiperparámetros sin mirar la prueba; después se reentrena con entrenamiento + validación,
+# que es el mismo periodo de entrenamiento de la entrega anterior.
+INICIO_VALIDACION = "2025-10-01"
 INICIO_PRUEBA = "2026-04-01"
 INICIOS_ENTRENAMIENTO = {
     "completo": FECHA_INICIO,
-    "postcovid": "2023-05-09",  # fin de la emergencia sanitaria (decreto DOF del 9 de mayo de 2023)
+    "postcovid": INICIO_POSTCOVID,
 }
 
 VARIABLES = [
@@ -89,19 +95,26 @@ def cargar_estaciones(ruta: Path, excluidas: list[int]) -> pd.DataFrame:
     return nomenclatura.set_index("estacion_id")[["capacidad", "latitud", "longitud"]]
 
 
-def partir_en_el_tiempo(tabla: pd.DataFrame, inicio_entrenamiento: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Separa entrenamiento y prueba por fecha.
+def entre(tabla: pd.DataFrame, inicio: str, fin_siguiente: str) -> pd.DataFrame:
+    """Horas desde inicio hasta antes de fin_siguiente, sin las últimas 3.
 
-    Las últimas horas de entrenamiento se recortan para que su ventana de 3 horas no entre al
-    periodo de prueba (si no, el modelo vería el inicio de la prueba al entrenar).
+    Esas últimas horas se recortan para que su ventana de 3 horas no entre al periodo que sigue
+    (si no, el modelo vería el inicio de la validación o de la prueba al entrenar).
     """
+    ultima_hora = pd.Timestamp(fin_siguiente) - pd.Timedelta(hours=HORAS_ANTICIPACION)
+    return tabla[(tabla["hora"] >= pd.Timestamp(inicio)) & (tabla["hora"] <= ultima_hora)]
+
+
+def partir_en_el_tiempo(tabla: pd.DataFrame, inicio_entrenamiento: str) -> dict[str, pd.DataFrame]:
+    """Separa por fecha: entrenamiento, validación, entrenamiento final (entrenamiento + validación) y prueba."""
     tabla = tabla[tabla["clase"].notna()]
-    inicio_prueba = pd.Timestamp(INICIO_PRUEBA)
-    ultima_hora_entrenamiento = inicio_prueba - pd.Timedelta(hours=HORAS_ANTICIPACION)
-    entrenamiento = tabla[(tabla["hora"] >= pd.Timestamp(inicio_entrenamiento))
-                          & (tabla["hora"] <= ultima_hora_entrenamiento)]
-    prueba = tabla[(tabla["hora"] >= inicio_prueba) & (tabla["hora"] < pd.Timestamp(FECHA_FIN) + pd.Timedelta(days=1))]
-    return entrenamiento, prueba
+    fin_prueba = pd.Timestamp(FECHA_FIN) + pd.Timedelta(days=1)
+    return {
+        "entrenamiento": entre(tabla, inicio_entrenamiento, INICIO_VALIDACION),
+        "validacion": entre(tabla, INICIO_VALIDACION, INICIO_PRUEBA),
+        "entrenamiento_final": entre(tabla, inicio_entrenamiento, INICIO_PRUEBA),
+        "prueba": tabla[(tabla["hora"] >= pd.Timestamp(INICIO_PRUEBA)) & (tabla["hora"] < fin_prueba)],
+    }
 
 
 def predecir_con_base(datos: pd.DataFrame) -> np.ndarray:
@@ -121,21 +134,21 @@ def predecir_con_base(datos: pd.DataFrame) -> np.ndarray:
     return prediccion
 
 
-def calcular_metricas(real: np.ndarray, prediccion: np.ndarray) -> dict[str, float]:
-    """Métricas en el conjunto de prueba, con prefijo test_.
+def calcular_metricas(real: np.ndarray, prediccion: np.ndarray, prefijo: str) -> dict[str, float]:
+    """Métricas de un conjunto: prefijo val_ (validación) o test_ (prueba).
 
     Lo importante son las dos clases de falla: recall = de las fallas reales, cuántas se
     anticiparon; precision = de las alertas, cuántas fueron fallas reales. La exactitud se
     registra para mostrar que engaña: casi todas las horas son normales.
     """
-    metricas = {"test_exactitud": accuracy_score(real, prediccion),
-                "test_f1_fallas": f1_score(real, prediccion, labels=[SIN_BICICLETAS, SIN_ANCLAJES], average="macro")}
+    metricas = {f"{prefijo}_exactitud": accuracy_score(real, prediccion),
+                f"{prefijo}_f1_fallas": f1_score(real, prediccion, labels=[SIN_BICICLETAS, SIN_ANCLAJES], average="macro")}
     for clase in [SIN_BICICLETAS, SIN_ANCLAJES]:
         nombre = NOMBRES_CLASES[clase]
-        metricas[f"test_recall_{nombre}"] = recall_score(real, prediccion, labels=[clase], average="macro")
-        metricas[f"test_precision_{nombre}"] = precision_score(real, prediccion, labels=[clase], average="macro",
-                                                               zero_division=0)
-        metricas[f"test_f1_{nombre}"] = f1_score(real, prediccion, labels=[clase], average="macro")
+        metricas[f"{prefijo}_recall_{nombre}"] = recall_score(real, prediccion, labels=[clase], average="macro")
+        metricas[f"{prefijo}_precision_{nombre}"] = precision_score(real, prediccion, labels=[clase],
+                                                                    average="macro", zero_division=0)
+        metricas[f"{prefijo}_f1_{nombre}"] = f1_score(real, prediccion, labels=[clase], average="macro")
     return metricas
 
 
@@ -175,28 +188,42 @@ def main(modelo: str = typer.Option("hgb", help="base o hgb"),
     estaciones = cargar_estaciones(NOMENCLATURA_FILE, ESTACIONES_EXCLUIDAS)
     tabla = construir_tabla_p2(viajes, estaciones, HORAS_ANTICIPACION, UMBRAL_FALLA, SEMANAS_HISTORIAL)
     del viajes
-    entrenamiento, prueba = partir_en_el_tiempo(tabla, inicio_entrenamiento)
-    logger.info(f"Filas estación × hora · entrenamiento: {len(entrenamiento):,} · prueba: {len(prueba):,}")
+    partes = partir_en_el_tiempo(tabla, inicio_entrenamiento)
+    entrenamiento, validacion = partes["entrenamiento"], partes["validacion"]
+    entrenamiento_final, prueba = partes["entrenamiento_final"], partes["prueba"]
+    logger.info(f"Filas estación × hora · entrenamiento: {len(entrenamiento):,} · validación: {len(validacion):,}"
+                f" · entrenamiento final: {len(entrenamiento_final):,} · prueba: {len(prueba):,}")
 
     parametros = {
-        "pregunta": "P2", "modelo": modelo, "periodo": periodo,
-        "fecha_inicio_entrenamiento": inicio_entrenamiento, "fecha_inicio_prueba": INICIO_PRUEBA,
-        "fecha_fin_prueba": FECHA_FIN, "version_datos": VERSION_DATOS,
+        "pregunta": "p2", "modelo": modelo, "periodo": periodo,
+        "fecha_inicio_entrenamiento": inicio_entrenamiento, "fecha_inicio_validacion": INICIO_VALIDACION,
+        "fecha_inicio_prueba": INICIO_PRUEBA, "fecha_fin_prueba": FECHA_FIN, "version_datos": VERSION_DATOS,
         "huella_manifiesto": huella_manifiesto(MANIFIESTO_FILE), "semilla": SEED,
         "horas_anticipacion": HORAS_ANTICIPACION, "umbral_falla": round(UMBRAL_FALLA, 4),
         "semanas_historial": SEMANAS_HISTORIAL, "estaciones_excluidas": len(ESTACIONES_EXCLUIDAS),
         "duracion_minima_segundos": DURACION_MINIMA_SEGUNDOS,
-        "filas_entrenamiento": len(entrenamiento), "filas_prueba": len(prueba),
+        "filas_entrenamiento": len(entrenamiento), "filas_validacion": len(validacion),
+        "filas_entrenamiento_final": len(entrenamiento_final), "filas_prueba": len(prueba),
     }
 
+    real_validacion = validacion["clase"].astype(int).to_numpy()
     real = prueba["clase"].astype(int).to_numpy()
     if modelo == "base":
+        prediccion_validacion = predecir_con_base(validacion)
         prediccion = predecir_con_base(prueba)
         clasificador = None
     elif modelo == "hgb":
         pesos = "balanced" if balanceado else None
-        clasificador = HistGradientBoostingClassifier(**HIPERPARAMETROS_HGB, class_weight=pesos, random_state=SEED)
-        clasificador.fit(entrenamiento[VARIABLES], entrenamiento["clase"].astype(int))
+
+        def nuevo_clasificador() -> HistGradientBoostingClassifier:
+            return HistGradientBoostingClassifier(**HIPERPARAMETROS_HGB, class_weight=pesos, random_state=SEED)
+
+        # Validación: se entrena sin los 6 meses de validación y se evalúa con ellos.
+        clasificador = nuevo_clasificador().fit(entrenamiento[VARIABLES], entrenamiento["clase"].astype(int))
+        prediccion_validacion = clasificador.predict(validacion[VARIABLES])
+        # Prueba: se reentrena con entrenamiento + validación; este es el modelo que se registra.
+        clasificador = nuevo_clasificador().fit(entrenamiento_final[VARIABLES],
+                                                entrenamiento_final["clase"].astype(int))
         prediccion = clasificador.predict(prueba[VARIABLES])
         parametros.update({f"hgb_{nombre}": valor for nombre, valor in HIPERPARAMETROS_HGB.items()})
         parametros["hgb_class_weight"] = pesos
@@ -204,7 +231,8 @@ def main(modelo: str = typer.Option("hgb", help="base o hgb"),
     else:
         raise typer.BadParameter("modelo debe ser base o hgb")
 
-    metricas = calcular_metricas(real, prediccion)
+    metricas = (calcular_metricas(real_validacion, prediccion_validacion, "val")
+                | calcular_metricas(real, prediccion, "test"))
 
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(MLFLOW_EXPERIMENT)

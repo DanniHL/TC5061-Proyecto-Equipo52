@@ -35,6 +35,9 @@ MANIFIESTO_FILE = PROJ_ROOT / "references" / "manifiesto_datos.csv"
 # Periodo de análisis: historia completa publicada por MiBici.
 FECHA_INICIO = "2014-12-01"
 FECHA_FIN = "2026-09-30"
+# Inicio del periodo Post-Covid: fin de la emergencia sanitaria (decreto DOF del 9 de mayo de 2023).
+# P2 lo usa como inicio de entrenamiento alterno y P3 para medir la actividad reciente de cada estación.
+INICIO_POSTCOVID = "2023-05-09"
 
 # Columnas de viajes que se leen. Se excluyen Usuario_Id, Genero y Año_de_nacimiento
 # porque son datos personales y no se necesitan para las preguntas del proyecto.
