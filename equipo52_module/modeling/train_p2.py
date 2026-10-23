@@ -10,6 +10,7 @@ Uso:
     python equipo52_module/modeling/train_p2.py --modelo hgb --periodo completo
     python equipo52_module/modeling/train_p2.py --modelo hgb --periodo postcovid
     python equipo52_module/modeling/train_p2.py --modelo hgb --periodo completo --balanceado
+    python equipo52_module/modeling/train_p2.py --modelo hgb --params "max_iter=300,learning_rate=0.05"
 """
 
 import hashlib
@@ -82,7 +83,10 @@ VARIABLES = [
 
 TIPOS_CONFIABLES_HGB = ["sklearn.ensemble._hist_gradient_boosting.predictor.TreePredictor"]
 
-HIPERPARAMETROS_HGB = {"max_iter": 200, "learning_rate": 0.1, "max_leaf_nodes": 31}
+# Valores por omisión; con --params se cambian los que se indiquen (los demás se quedan así).
+# min_samples_leaf y l2_regularization tienen los mismos valores por omisión de scikit-learn.
+HIPERPARAMETROS_HGB = {"max_iter": 200, "learning_rate": 0.1, "max_leaf_nodes": 31,
+                       "min_samples_leaf": 20, "l2_regularization": 0.0}
 # Con --balanceado, las fallas pesan lo mismo que las horas normales: el modelo detecta más fallas
 # pero da muchas más alertas falsas. Sin él, da menos alertas y más certeras.
 
@@ -115,6 +119,22 @@ def partir_en_el_tiempo(tabla: pd.DataFrame, inicio_entrenamiento: str) -> dict[
         "entrenamiento_final": entre(tabla, inicio_entrenamiento, INICIO_PRUEBA),
         "prueba": tabla[(tabla["hora"] >= pd.Timestamp(INICIO_PRUEBA)) & (tabla["hora"] < fin_prueba)],
     }
+
+
+def leer_hiperparametros(texto: str) -> dict:
+    """Convierte "max_iter=300,learning_rate=0.05" en los hiperparámetros de HGB.
+
+    Parte de HIPERPARAMETROS_HGB y solo cambia los indicados; cada valor se convierte al tipo de
+    su valor por omisión (entero o decimal). Un nombre desconocido detiene la corrida, para no
+    entrenar en silencio con un hiperparámetro mal escrito.
+    """
+    hiperparametros = dict(HIPERPARAMETROS_HGB)
+    for par in filter(None, texto.replace(" ", "").split(",")):
+        nombre, valor = par.split("=")
+        if nombre not in HIPERPARAMETROS_HGB:
+            raise typer.BadParameter(f"hiperparámetro desconocido: {nombre}. Válidos: {', '.join(HIPERPARAMETROS_HGB)}")
+        hiperparametros[nombre] = type(HIPERPARAMETROS_HGB[nombre])(valor)
+    return hiperparametros
 
 
 def predecir_con_base(datos: pd.DataFrame) -> np.ndarray:
@@ -179,7 +199,11 @@ def commit_actual() -> str:
 @app.command()
 def main(modelo: str = typer.Option("hgb", help="base o hgb"),
          periodo: str = typer.Option("completo", help="completo o postcovid"),
-         balanceado: bool = typer.Option(False, help="dar a las fallas el mismo peso que a las horas normales")):
+         balanceado: bool = typer.Option(False, help="dar a las fallas el mismo peso que a las horas normales"),
+         params: str = typer.Option("", help='hiperparámetros de hgb, por ejemplo "max_iter=300,learning_rate=0.05"')):
+    if params and modelo != "hgb":
+        raise typer.BadParameter("--params solo aplica al modelo hgb")
+    hiperparametros = leer_hiperparametros(params)
     inicio_entrenamiento = INICIOS_ENTRENAMIENTO[periodo]
     logger.info(f"P2 · modelo {modelo} · entrenamiento desde {inicio_entrenamiento} · prueba desde {INICIO_PRUEBA}")
 
@@ -216,7 +240,7 @@ def main(modelo: str = typer.Option("hgb", help="base o hgb"),
         pesos = "balanced" if balanceado else None
 
         def nuevo_clasificador() -> HistGradientBoostingClassifier:
-            return HistGradientBoostingClassifier(**HIPERPARAMETROS_HGB, class_weight=pesos, random_state=SEED)
+            return HistGradientBoostingClassifier(**hiperparametros, class_weight=pesos, random_state=SEED)
 
         # Validación: se entrena sin los 6 meses de validación y se evalúa con ellos.
         clasificador = nuevo_clasificador().fit(entrenamiento[VARIABLES], entrenamiento["clase"].astype(int))
@@ -225,7 +249,7 @@ def main(modelo: str = typer.Option("hgb", help="base o hgb"),
         clasificador = nuevo_clasificador().fit(entrenamiento_final[VARIABLES],
                                                 entrenamiento_final["clase"].astype(int))
         prediccion = clasificador.predict(prueba[VARIABLES])
-        parametros.update({f"hgb_{nombre}": valor for nombre, valor in HIPERPARAMETROS_HGB.items()})
+        parametros.update({f"hgb_{nombre}": valor for nombre, valor in hiperparametros.items()})
         parametros["hgb_class_weight"] = pesos
         parametros["variables"] = ", ".join(VARIABLES)
     else:
@@ -237,6 +261,8 @@ def main(modelo: str = typer.Option("hgb", help="base o hgb"),
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(MLFLOW_EXPERIMENT)
     nombre_corrida = f"p2-{modelo}{'-balanceado' if balanceado else ''}-{periodo}"
+    if params:  # por ejemplo p2-hgb-completo-max_iter300-learning_rate0.05
+        nombre_corrida += "-" + params.replace(" ", "").replace("=", "").replace(",", "-")
     with mlflow.start_run(run_name=nombre_corrida):
         mlflow.set_tags({"equipo": "52", "pregunta": "P2", "commit": commit_actual()})
         mlflow.log_params(parametros)
