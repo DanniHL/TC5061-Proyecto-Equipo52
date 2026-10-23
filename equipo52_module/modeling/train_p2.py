@@ -186,6 +186,17 @@ def porcentaje_por_anio(tabla: pd.DataFrame) -> pd.DataFrame:
     return (conteo.div(conteo.sum(axis=1), axis=0) * 100).round(2)
 
 
+def etiquetas(modelo: str, etapa: str) -> dict[str, str]:
+    """Etiquetas de la corrida para filtrar y comparar en la interfaz de MLflow.
+
+    equipo, pregunta y commit son las del equipo desde la semana 5; question, model_family y
+    stage_of_work (baseline, search o candidate) son las que pide la semana 6.
+    """
+    return {"equipo": "52", "pregunta": "P2", "commit": commit_actual(),
+            "question": "p2", "model_family": "baseline" if modelo == "base" else "hgb",
+            "stage_of_work": etapa}
+
+
 def huella_manifiesto(ruta: Path) -> str:
     """Huella SHA-256 del manifiesto de datos: identifica exactamente qué archivos se usaron."""
     return hashlib.sha256(ruta.read_bytes()).hexdigest()
@@ -264,7 +275,7 @@ def main(modelo: str = typer.Option("hgb", help="base o hgb"),
     if params:  # por ejemplo p2-hgb-completo-max_iter300-learning_rate0.05
         nombre_corrida += "-" + params.replace(" ", "").replace("=", "").replace(",", "-")
     with mlflow.start_run(run_name=nombre_corrida):
-        mlflow.set_tags({"equipo": "52", "pregunta": "P2", "commit": commit_actual()})
+        mlflow.set_tags(etiquetas(modelo, "baseline" if modelo == "base" else "candidate"))
         mlflow.log_params(parametros)
         mlflow.log_metrics(metricas)
         with tempfile.TemporaryDirectory() as carpeta:
