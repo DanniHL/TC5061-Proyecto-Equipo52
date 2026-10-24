@@ -13,14 +13,17 @@ Uso:
     python equipo52_module/modeling/train_p2.py --modelo hgb --params "max_iter=300,learning_rate=0.05"
     python equipo52_module/modeling/train_p2.py --modelo hgb --params "peso_fallas=3"
     python equipo52_module/modeling/train_p2.py --modelo logistica --params "C=1.0,peso_fallas=3"
+    python equipo52_module/modeling/train_p2.py --modelo busqueda
 """
 
 import hashlib
+import itertools
 import json
 import os
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from loguru import logger
@@ -124,6 +127,10 @@ HIPERPARAMETROS = {
     "logistica": {"C": 1.0, "max_iter": 200, "peso_fallas": 1.0},
 }
 FAMILIAS = {"base": "baseline", "hgb": "hgb", "logistica": "logistica"}
+
+# Rejilla de la búsqueda con nested runs (--modelo busqueda): una corrida hija por combinación.
+# Está en el código para que la búsqueda se reproduzca igual desde cualquier clon del repositorio.
+REJILLA_BUSQUEDA = {"peso_fallas": [2.0, 3.0, 5.0, 8.0], "learning_rate": [0.05, 0.1]}
 
 
 def cargar_estaciones(ruta: Path, excluidas: list[int]) -> pd.DataFrame:
@@ -390,71 +397,94 @@ def commit_actual() -> str:
     return subprocess.run(["git", "rev-parse", "HEAD"], cwd=PROJ_ROOT, capture_output=True, text=True).stdout.strip()
 
 
-@app.command()
-def main(modelo: str = typer.Option("hgb", help="base, hgb o logistica"),
-         periodo: str = typer.Option("completo", help="completo o postcovid"),
-         balanceado: bool = typer.Option(False, help="dar a las fallas el mismo peso que a las horas normales"),
-         params: str = typer.Option("", help='hiperparámetros, por ejemplo "max_iter=300,peso_fallas=3"')):
-    if modelo not in FAMILIAS:
-        raise typer.BadParameter("modelo debe ser base, hgb o logistica")
-    if modelo == "base" and (params or balanceado):
-        raise typer.BadParameter("el baseline no tiene hiperparámetros ni pesos")
-    hiperparametros = leer_hiperparametros(modelo, params) if modelo != "base" else {}
-    pesos = pesos_por_clase(hiperparametros.get("peso_fallas", 1.0), balanceado)
-    inicio_entrenamiento = INICIOS_ENTRENAMIENTO[periodo]
-    logger.info(f"P2 · modelo {modelo} · entrenamiento desde {inicio_entrenamiento} · prueba desde {INICIO_PRUEBA}")
-
-    viajes = pd.read_parquet(VIAJES_FILE)
-    viajes = quitar_viajes_cortos(viajes, DURACION_MINIMA_SEGUNDOS)
+def preparar_datos(periodo: str) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Construye la tabla estación × hora y la parte en entrenamiento, validación, entrenamiento final y prueba."""
+    viajes = quitar_viajes_cortos(pd.read_parquet(VIAJES_FILE), DURACION_MINIMA_SEGUNDOS)
     estaciones = cargar_estaciones(NOMENCLATURA_FILE, ESTACIONES_EXCLUIDAS)
     tabla = construir_tabla_p2(viajes, estaciones, HORAS_ANTICIPACION, UMBRAL_FALLA, SEMANAS_HISTORIAL)
     del viajes
-    partes = partir_en_el_tiempo(tabla, inicio_entrenamiento)
-    entrenamiento, validacion = partes["entrenamiento"], partes["validacion"]
-    entrenamiento_final, prueba = partes["entrenamiento_final"], partes["prueba"]
-    logger.info(f"Filas estación × hora · entrenamiento: {len(entrenamiento):,} · validación: {len(validacion):,}"
-                f" · entrenamiento final: {len(entrenamiento_final):,} · prueba: {len(prueba):,}")
+    partes = partir_en_el_tiempo(tabla, INICIOS_ENTRENAMIENTO[periodo])
+    logger.info("Filas estación × hora · " + " · ".join(f"{nombre}: {len(datos):,}" for nombre, datos in partes.items()))
+    return tabla, partes
 
-    parametros = {
+
+def parametros_comunes(modelo: str, periodo: str, partes: dict[str, pd.DataFrame]) -> dict:
+    """Parámetros que registra toda corrida de P2: datos, partición, regla de riesgo y semilla."""
+    return {
         "pregunta": "p2", "modelo": modelo, "periodo": periodo,
-        "fecha_inicio_entrenamiento": inicio_entrenamiento, "fecha_inicio_validacion": INICIO_VALIDACION,
+        "fecha_inicio_entrenamiento": INICIOS_ENTRENAMIENTO[periodo], "fecha_inicio_validacion": INICIO_VALIDACION,
         "fecha_inicio_prueba": INICIO_PRUEBA, "fecha_fin_prueba": FECHA_FIN, "version_datos": VERSION_DATOS,
         "huella_manifiesto": huella_manifiesto(MANIFIESTO_FILE), "semilla": SEED,
         "horas_anticipacion": HORAS_ANTICIPACION, "umbral_falla": round(UMBRAL_FALLA, 4),
         "semanas_historial": SEMANAS_HISTORIAL, "estaciones_excluidas": len(ESTACIONES_EXCLUIDAS),
         "duracion_minima_segundos": DURACION_MINIMA_SEGUNDOS,
-        "filas_entrenamiento": len(entrenamiento), "filas_validacion": len(validacion),
-        "filas_entrenamiento_final": len(entrenamiento_final), "filas_prueba": len(prueba),
+        "filas_entrenamiento": len(partes["entrenamiento"]), "filas_validacion": len(partes["validacion"]),
+        "filas_entrenamiento_final": len(partes["entrenamiento_final"]), "filas_prueba": len(partes["prueba"]),
     }
+
+
+def parametros_del_modelo(modelo: str, hiperparametros: dict, pesos: dict | str | None) -> dict:
+    """Hiperparámetros con prefijo del modelo; peso_fallas sin prefijo para comparar familias en la misma columna."""
+    parametros = {f"{modelo}_{nombre}": valor for nombre, valor in hiperparametros.items() if nombre != "peso_fallas"}
+    parametros["peso_fallas"] = hiperparametros["peso_fallas"]
+    parametros[f"{modelo}_class_weight"] = pesos
+    parametros["variables"] = ", ".join(VARIABLES)
+    return parametros
+
+
+def entrenar(modelo: str, hiperparametros: dict, pesos, datos: pd.DataFrame):
+    """Entrena un modelo y mide cuánto tarda (dato de costo para elegir el modelo)."""
+    inicio = time.perf_counter()
+    clasificador = nuevo_clasificador(modelo, hiperparametros, pesos).fit(variables(datos, modelo),
+                                                                          datos["clase"].astype(int))
+    return clasificador, time.perf_counter() - inicio
+
+
+def guardar_configuracion(carpeta: Path, configuracion: dict) -> None:
+    """config/: la configuración de la corrida en JSON y los archivos de configuración del proyecto."""
+    (carpeta / "config" / "corrida_p2.json").write_text(json.dumps(configuracion, indent=2, ensure_ascii=False))
+    for archivo in ["equipo52_module/config.py", "MLproject", "python_env.yaml"]:
+        if (PROJ_ROOT / archivo).exists():
+            shutil.copy(PROJ_ROOT / archivo, carpeta / "config" / Path(archivo).name)
+
+
+def carpeta_de_artefactos(carpeta: str) -> Path:
+    """Crea las subcarpetas plots/, data/ y config/ dentro de una carpeta temporal."""
+    carpeta = Path(carpeta)
+    for sub in ["plots", "data", "config"]:
+        (carpeta / sub).mkdir()
+    return carpeta
+
+
+def correr_candidata(modelo: str, periodo: str, balanceado: bool, params: str,
+                     tabla: pd.DataFrame, partes: dict[str, pd.DataFrame]) -> None:
+    """Una corrida baseline o candidata: métricas de validación y prueba, artefactos y, si entrena, el modelo."""
+    hiperparametros = leer_hiperparametros(modelo, params) if modelo != "base" else {}
+    pesos = pesos_por_clase(hiperparametros.get("peso_fallas", 1.0), balanceado)
+    entrenamiento, validacion = partes["entrenamiento"], partes["validacion"]
+    entrenamiento_final, prueba = partes["entrenamiento_final"], partes["prueba"]
+    parametros = parametros_comunes(modelo, periodo, partes)
 
     real_validacion = validacion["clase"].astype(int).to_numpy()
     real = prueba["clase"].astype(int).to_numpy()
     if modelo == "base":
         prediccion_validacion = predecir_con_base(validacion)
         prediccion = predecir_con_base(prueba)
-        clasificador = None
+        clasificador, segundos = None, 0.0
     else:
         # Validación: se entrena sin los 6 meses de validación y se evalúa con ellos.
-        clasificador = nuevo_clasificador(modelo, hiperparametros, pesos).fit(
-            variables(entrenamiento, modelo), entrenamiento["clase"].astype(int))
+        clasificador, _ = entrenar(modelo, hiperparametros, pesos, entrenamiento)
         prediccion_validacion = clasificador.predict(variables(validacion, modelo))
         # Prueba: se reentrena con entrenamiento + validación; este es el modelo que se registra.
-        clasificador = nuevo_clasificador(modelo, hiperparametros, pesos).fit(
-            variables(entrenamiento_final, modelo), entrenamiento_final["clase"].astype(int))
+        clasificador, segundos = entrenar(modelo, hiperparametros, pesos, entrenamiento_final)
         prediccion = clasificador.predict(variables(prueba, modelo))
         probabilidades = clasificador.predict_proba(variables(prueba, modelo))  # para la curva precisión-recall
-        # peso_fallas va sin prefijo para comparar las dos familias en la misma columna de MLflow.
-        parametros.update({f"{modelo}_{nombre}": valor for nombre, valor in hiperparametros.items()
-                           if nombre != "peso_fallas"})
-        parametros["peso_fallas"] = hiperparametros["peso_fallas"]
-        parametros[f"{modelo}_class_weight"] = pesos
-        parametros["variables"] = ", ".join(VARIABLES)
+        parametros.update(parametros_del_modelo(modelo, hiperparametros, pesos))
 
     metricas = (calcular_metricas(real_validacion, prediccion_validacion, "val")
-                | calcular_metricas(real, prediccion, "test"))
+                | calcular_metricas(real, prediccion, "test")
+                | {"segundos_entrenamiento": round(segundos, 1)})
 
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    mlflow.set_experiment(MLFLOW_EXPERIMENT)
     nombre_corrida = f"p2-{modelo}{'-balanceado' if balanceado else ''}-{periodo}"
     if params:  # por ejemplo p2-hgb-completo-max_iter300-learning_rate0.05
         nombre_corrida += "-" + params.replace(" ", "").replace("=", "").replace(",", "-")
@@ -474,10 +504,8 @@ def main(modelo: str = typer.Option("hgb", help="base, hgb o logistica"),
                          context="testing")
 
         # Artefactos en subcarpetas: plots/ (gráficas), data/ (versión de datos y tablas) y config/.
-        with tempfile.TemporaryDirectory() as carpeta:
-            carpeta = Path(carpeta)
-            for sub in ["plots", "data", "config"]:
-                (carpeta / sub).mkdir()
+        with tempfile.TemporaryDirectory() as temporal:
+            carpeta = carpeta_de_artefactos(temporal)
             grafica_confusion(real, prediccion, carpeta / "plots" / "p2_matriz_confusion_prueba.png")
             if clasificador is not None:
                 grafica_precision_recall(real, probabilidades, clasificador.classes_, prediccion,
@@ -488,13 +516,8 @@ def main(modelo: str = typer.Option("hgb", help="base, hgb o logistica"),
                 carpeta / "data" / "p2_porcentaje_clases_por_anio.csv")
             if modelo == "logistica":
                 coeficientes_logistica(clasificador).to_csv(carpeta / "data" / "p2_coeficientes_logistica.csv")
-            configuracion = {"parametros": parametros, "etiquetas": etiquetas(modelo, etapa),
-                             "hiperparametros": hiperparametros if clasificador is not None else None,
-                             "variables": VARIABLES}
-            (carpeta / "config" / "corrida_p2.json").write_text(json.dumps(configuracion, indent=2, ensure_ascii=False))
-            for archivo in ["equipo52_module/config.py", "MLproject", "python_env.yaml"]:
-                if (PROJ_ROOT / archivo).exists():
-                    shutil.copy(PROJ_ROOT / archivo, carpeta / "config" / Path(archivo).name)
+            guardar_configuracion(carpeta, {"parametros": parametros, "etiquetas": etiquetas(modelo, etapa),
+                                            "hiperparametros": hiperparametros or None, "variables": VARIABLES})
             mlflow.log_artifacts(carpeta)
 
         if clasificador is not None:
@@ -509,6 +532,126 @@ def main(modelo: str = typer.Option("hgb", help="base, hgb o logistica"),
     for nombre, valor in metricas.items():
         logger.info(f"{nombre}: {valor:.3f}")
     logger.success(f"Corrida {nombre_corrida} registrada en el experimento {MLFLOW_EXPERIMENT}")
+
+
+def grafica_busqueda(resultados: pd.DataFrame, f1_base: float, ruta: Path) -> None:
+    """F1 de fallas en validación según peso_fallas, una línea por learning_rate, contra el baseline."""
+    colores = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]
+    fig, ax = plt.subplots(figsize=(6.5, 4.5))
+    for color, (tasa, grupo) in zip(colores, resultados.groupby("learning_rate")):
+        grupo = grupo.sort_values("peso_fallas")
+        ax.plot(grupo["peso_fallas"], grupo["val_f1_fallas"], marker="o", markersize=8, linewidth=2, color=color,
+                markeredgecolor="white", label=f"HGB · learning_rate {tasa}")
+    ax.axhline(f1_base, color=TINTA, linestyle="--", linewidth=1)
+    ax.text(resultados["peso_fallas"].max(), f1_base, f"baseline {f1_base:.3f}", va="bottom", ha="right",
+            fontsize=9, color=TINTA)
+    mejor = resultados.loc[resultados["val_f1_fallas"].idxmax()]
+    ax.annotate(f"mejor: {mejor['val_f1_fallas']:.3f}", (mejor["peso_fallas"], mejor["val_f1_fallas"]),
+                textcoords="offset points", xytext=(0, 10), ha="center", fontsize=9, color="#0b0b0b")
+    ax.set_xticks(sorted(resultados["peso_fallas"].unique()))
+    ax.set_xlabel("peso_fallas: cuánto pesa una hora de falla frente a una normal", color=TINTA)
+    ax.set_ylabel("F1 de fallas en validación", color=TINTA)
+    ax.set_title("P2 · Búsqueda de hiperparámetros de HGB", color="#0b0b0b", fontsize=11)
+    ax.grid(color="#e4e3df", linewidth=0.8)
+    ax.tick_params(colors=TINTA, length=0)
+    for lado in ["top", "right"]:
+        ax.spines[lado].set_visible(False)
+    ax.legend(fontsize=8, frameon=False, loc="lower right")
+    fig.tight_layout()
+    fig.savefig(ruta, dpi=150)
+    plt.close(fig)
+
+
+def correr_busqueda(periodo: str, params: str, partes: dict[str, pd.DataFrame]) -> None:
+    """Búsqueda de hiperparámetros de HGB con nested runs: una corrida padre y una hija por combinación.
+
+    Cada hija entrena con entrenamiento y mide solo en validación: la prueba no se usa para elegir.
+    El padre guarda la tabla de resultados, la gráfica y cuál fue la mejor hija; la mejor
+    combinación se corre después como candidata completa (con prueba y modelo).
+    """
+    base = leer_hiperparametros("hgb", params)  # --params cambia los hiperparámetros que no están en la rejilla
+    repetidos = set(REJILLA_BUSQUEDA) & {par.split("=")[0].strip() for par in filter(None, params.split(","))}
+    if repetidos:
+        raise typer.BadParameter(f"{', '.join(repetidos)} ya está en la rejilla de búsqueda")
+    entrenamiento, validacion = partes["entrenamiento"], partes["validacion"]
+    real_validacion = validacion["clase"].astype(int).to_numpy()
+    f1_base = calcular_metricas(real_validacion, predecir_con_base(validacion), "val")["val_f1_fallas"]
+    combinaciones = [dict(zip(REJILLA_BUSQUEDA, valores)) for valores in itertools.product(*REJILLA_BUSQUEDA.values())]
+    nombre_padre = f"p2-busqueda-hgb-{periodo}"
+
+    resultados = []
+    with mlflow.start_run(run_name=nombre_padre) as padre:
+        parametros = parametros_comunes("busqueda", periodo, partes) | {
+            "rejilla": json.dumps(REJILLA_BUSQUEDA), "combinaciones": len(combinaciones),
+            "metrica_seleccion": "val_f1_fallas"}
+        parametros.update({f"hgb_{nombre}": valor for nombre, valor in base.items() if nombre not in REJILLA_BUSQUEDA})
+        mlflow.set_tags(etiquetas("hgb", "search"))
+        mlflow.log_params(parametros)
+        columnas = VARIABLES + ["clase"]
+        mlflow.log_input(conjunto_para_mlflow(entrenamiento[columnas], f"p2-entrenamiento-sin-validacion-{periodo}",
+                                              parametros["huella_manifiesto"]), context="training")
+        mlflow.log_input(conjunto_para_mlflow(validacion[columnas], "p2-validacion", parametros["huella_manifiesto"]),
+                         context="validation")
+
+        for numero, combinacion in enumerate(combinaciones, start=1):
+            hiperparametros = base | combinacion
+            pesos = pesos_por_clase(hiperparametros["peso_fallas"], False)
+            sufijo = "-".join(f"{nombre}{valor}" for nombre, valor in combinacion.items())
+            logger.info(f"Hija {numero}/{len(combinaciones)} · {combinacion}")
+            with mlflow.start_run(run_name=f"{nombre_padre}-{sufijo}", nested=True):
+                clasificador, segundos = entrenar("hgb", hiperparametros, pesos, entrenamiento)
+                metricas = (calcular_metricas(real_validacion, clasificador.predict(validacion[VARIABLES]), "val")
+                            | {"segundos_entrenamiento": round(segundos, 1)})
+                mlflow.set_tags(etiquetas("hgb", "search"))
+                mlflow.log_params(parametros_del_modelo("hgb", hiperparametros, pesos) | {"periodo": periodo})
+                mlflow.log_metrics(metricas)
+            resultados.append(combinacion | metricas)
+            logger.info(f"   val_f1_fallas {metricas['val_f1_fallas']:.3f} · {segundos:.0f} s")
+
+        resultados = pd.DataFrame(resultados).sort_values("val_f1_fallas", ascending=False)
+        mejor = resultados.iloc[0]
+        mejor_combinacion = {nombre: mejor[nombre] for nombre in REJILLA_BUSQUEDA}
+        mlflow.log_metrics({"mejor_val_f1_fallas": mejor["val_f1_fallas"], "baseline_val_f1_fallas": f1_base,
+                            "segundos_busqueda": round(resultados["segundos_entrenamiento"].sum(), 1)})
+        mlflow.set_tag("mejor_combinacion", json.dumps(mejor_combinacion))
+        with tempfile.TemporaryDirectory() as temporal:
+            carpeta = carpeta_de_artefactos(temporal)
+            grafica_busqueda(resultados, f1_base, carpeta / "plots" / "p2_busqueda_val_f1.png")
+            resultados.round(4).to_csv(carpeta / "data" / "p2_busqueda_resultados.csv", index=False)
+            shutil.copy(MANIFIESTO_FILE, carpeta / "data" / MANIFIESTO_FILE.name)
+            guardar_configuracion(carpeta, {"parametros": parametros, "etiquetas": etiquetas("hgb", "search"),
+                                            "rejilla": REJILLA_BUSQUEDA, "hiperparametros_base": base,
+                                            "variables": VARIABLES})
+            mlflow.log_artifacts(carpeta)
+
+    logger.info("\n" + resultados.round(3).to_string(index=False))
+    sugerida = ",".join(f"{nombre}={valor}" for nombre, valor in mejor_combinacion.items())
+    logger.success(f"Búsqueda {nombre_padre} ({padre.info.run_id}) registrada. Mejor combinación: {sugerida} · "
+                   f"val_f1_fallas {mejor['val_f1_fallas']:.3f} (baseline {f1_base:.3f}). Siguiente paso: "
+                   f'--modelo hgb --params "{sugerida}"')
+
+
+@app.command()
+def main(modelo: str = typer.Option("hgb", help="base, hgb, logistica o busqueda (búsqueda de HGB con nested runs)"),
+         periodo: str = typer.Option("completo", help="completo o postcovid"),
+         balanceado: bool = typer.Option(False, help="dar a las fallas el mismo peso que a las horas normales"),
+         params: str = typer.Option("", help='hiperparámetros, por ejemplo "max_iter=300,peso_fallas=3"')):
+    if modelo not in FAMILIAS and modelo != "busqueda":
+        raise typer.BadParameter("modelo debe ser base, hgb, logistica o busqueda")
+    if modelo == "base" and (params or balanceado):
+        raise typer.BadParameter("el baseline no tiene hiperparámetros ni pesos")
+    if modelo == "busqueda" and balanceado:
+        raise typer.BadParameter("la búsqueda ya explora los pesos con peso_fallas")
+    leer_hiperparametros("hgb" if modelo == "busqueda" else modelo, params) if modelo != "base" else None  # valida antes de cargar datos
+    logger.info(f"P2 · modelo {modelo} · entrenamiento desde {INICIOS_ENTRENAMIENTO[periodo]} · prueba desde {INICIO_PRUEBA}")
+
+    tabla, partes = preparar_datos(periodo)
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    mlflow.set_experiment(MLFLOW_EXPERIMENT)
+    if modelo == "busqueda":
+        correr_busqueda(periodo, params, partes)
+    else:
+        correr_candidata(modelo, periodo, balanceado, params, tabla, partes)
 
 
 if __name__ == "__main__":
