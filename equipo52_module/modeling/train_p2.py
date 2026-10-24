@@ -27,10 +27,7 @@ import time
 from pathlib import Path
 
 from loguru import logger
-import matplotlib
-
-matplotlib.use("Agg")  # gráficas a archivo, sin abrir ventanas
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt  # las gráficas se guardan con savefig; nunca se muestran en pantalla
 
 os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")  # oculta un aviso de MLflow que no aplica aquí
 import mlflow  # noqa: E402
@@ -119,8 +116,8 @@ TIPOS_CONFIABLES = {
 # scikit-learn, así que con estos valores el modelo es el mismo de la semana 5.
 # peso_fallas: cuánto pesa cada hora de falla frente a una hora normal al entrenar. Con 1 todas
 # pesan igual: el modelo da pocas alertas, muy certeras, y se le escapan muchas fallas. Con
-# --balanceado (más de 20 veces; el notebook 2.1 lo calcula) da demasiadas alertas falsas. Un valor
-# intermedio busca el equilibrio.
+# --balanceado (18 a 19 veces en el entrenamiento completo; el notebook 2.1 lo calcula) da demasiadas
+# alertas falsas. Un valor intermedio busca el equilibrio.
 HIPERPARAMETROS = {
     "hgb": {"max_iter": 200, "learning_rate": 0.1, "max_leaf_nodes": 31,
             "min_samples_leaf": 20, "l2_regularization": 0.0, "peso_fallas": 1.0},
