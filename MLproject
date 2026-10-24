@@ -16,7 +16,7 @@ entry_points:
         default: ""
       periodo:
         type: string
-        default: ""
+        default: "completo"
       balanceado:
         type: string
         default: "false"
@@ -41,6 +41,9 @@ entry_points:
       max_leaf_nodes:
         type: int
         default: 31
+      peso_fallas:
+        type: float
+        default: 1.0
 
     command: "
     python -m equipo52_module.project_train
@@ -54,4 +57,5 @@ entry_points:
     --sin-redondos-cortos {sin_redondos_cortos}
     --max-iter {max_iter}
     --learning-rate {learning_rate}
-    --max-leaf-nodes {max_leaf_nodes}"
+    --max-leaf-nodes {max_leaf_nodes}
+    --peso-fallas {peso_fallas}"

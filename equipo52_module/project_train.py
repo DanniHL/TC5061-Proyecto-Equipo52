@@ -39,6 +39,7 @@ def construir_comando(args: argparse.Namespace) -> list[str]:
         comando.extend(["--max-iter", str(args.max_iter)])
         comando.extend(["--learning-rate", str(args.learning_rate)])
         comando.extend(["--max-leaf-nodes", str(args.max_leaf_nodes)])
+        comando.extend(["--peso-fallas", str(args.peso_fallas)])
 
     elif args.pregunta == "p3":
         comando.extend(["--k", str(args.k)])
@@ -58,7 +59,7 @@ def main() -> None:
     )
     parser.add_argument("--pregunta", required=True, choices=["p1", "p2", "p3"])
     parser.add_argument("--modelo", default="")
-    parser.add_argument("--periodo", default="")
+    parser.add_argument("--periodo", default="completo")
     parser.add_argument("--balanceado", type=convertir_booleano, default=False)
     parser.add_argument("--k", type=int, default=0)
     parser.add_argument("--min-cluster-size", type=int, default=15)
@@ -71,6 +72,8 @@ def main() -> None:
     parser.add_argument("--max-iter", type=int, default=200)
     parser.add_argument("--learning-rate", type=float, default=0.1)
     parser.add_argument("--max-leaf-nodes", type=int, default=31)
+    # P2: cuánto pesa cada hora de falla frente a una normal al entrenar (1.0 = todas pesan igual).
+    parser.add_argument("--peso-fallas", type=float, default=1.0)
 
     args = parser.parse_args()
     comando = construir_comando(args)
