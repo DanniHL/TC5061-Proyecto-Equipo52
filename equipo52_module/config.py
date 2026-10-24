@@ -2,6 +2,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from loguru import logger
+import os
 
 # Load environment variables from .env file if it exists
 load_dotenv()
@@ -51,7 +52,10 @@ DURACION_MINIMA_SEGUNDOS = 60
 # MLflow
 MLFLOW_EXPERIMENT = "mibici-equipo52"
 # Registro local en la raíz del proyecto; mlflow.db y mlartifacts/ están excluidos de Git.
-MLFLOW_TRACKING_URI = f"sqlite:///{PROJ_ROOT / 'mlflow.db'}"
+MLFLOW_TRACKING_URI = os.getenv(
+    "MLFLOW_TRACKING_URI",
+    "http://127.0.0.1:5000",
+)
 SEED = 42
 
 # If tqdm is installed, configure loguru with tqdm.write
