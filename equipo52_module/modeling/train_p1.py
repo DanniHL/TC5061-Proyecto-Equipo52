@@ -28,6 +28,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+import argparse
 
 from equipo52_module.config import (
     ESTACIONES_EXCLUIDAS,
@@ -393,23 +394,40 @@ def parametros_comunes():
     }
 
 
-def registrar_resultado_mlflow(nombre_run, parametros, metricas, etiquetas=None,
-                               modelo=None, ruta_grafica=None):
-    """Registra parámetros, métricas, etiquetas y artefactos de una ejecución.
 
-    Agrega los parámetros comunes, las etiquetas equipo, pregunta y commit, y nombra las métricas
-    con el conjunto de prueba (test_mae, test_rmse), como pide la rúbrica.
-    """
-    with mlflow.start_run(run_name=nombre_run):
+def registrar_resultado_mlflow(
+    nombre_run,
+    parametros,
+    metricas,
+    etiquetas=None,
+    modelo=None,
+    ruta_grafica=None,
+):
+    """Registra cada resultado como una corrida anidada del pipeline P1."""
+    with mlflow.start_run(run_name=nombre_run, nested=True):
         mlflow.log_params({**parametros_comunes(), **parametros})
+
         mlflow.log_metrics(
-            {f"test_{nombre.lower()}": float(valor) for nombre, valor in metricas.items()}
+            {
+                f"test_{nombre.lower()}": float(valor)
+                for nombre, valor in metricas.items()
+            }
         )
-        mlflow.set_tags({"equipo": "52", "pregunta": "P1", "commit": commit_actual()})
+
+        mlflow.set_tags(
+            {
+                "equipo": "52",
+                "pregunta": "P1",
+                "commit": commit_actual(),
+            }
+        )
+
         for clave, valor in (etiquetas or {}).items():
             mlflow.set_tag(clave, valor)
+
         if modelo is not None:
             mlflow.sklearn.log_model(modelo, name="modelo")
+
         if ruta_grafica is not None:
             mlflow.log_artifact(str(ruta_grafica))
 
@@ -806,95 +824,157 @@ def evaluar_pronostico_siete_dias(pronosticos, matriz_demanda):
 # 6. Orquestación del flujo
 # ---------------------------------------------------------------------
 
-def main():
-    """Ejecuta el flujo completo de preparación, entrenamiento y evaluación."""
+
+def main(modelo_seleccionado="todos"):
+    """Ejecuta P1 completo o el modelo seleccionado."""
+    modelos_validos = {
+        "baseline", "lineal", "estacion", "ciclico", "7_dias", "todos"
+    }
+
+    if modelo_seleccionado not in modelos_validos:
+        raise ValueError(
+            f"Modelo no válido: {modelo_seleccionado}. "
+            f"Opciones: {sorted(modelos_validos)}"
+        )
+
     configurar_mlflow()
 
-    viajes = cargar_viajes_p1()
-    demanda = construir_demanda_diaria(viajes)
+    resultados = {}
 
-    historial_estaciones = resumir_historial_estaciones(demanda)
-    estaciones_baja, resumen_huecos = analizar_huecos_por_estacion(
-        demanda, historial_estaciones
-    )
-    print("\nEstaciones con baja cobertura:")
-    print(estaciones_baja.sort_values("Cobertura_pct").head(10).to_string(index=False))
-    print("\nMayores intervalos sin registros:")
-    if not resumen_huecos.empty:
-        print(resumen_huecos.head(10).to_string(index=False))
+    # Mantiene una corrida principal y registra cada resultado como hija.
+    with mlflow.start_run(run_name="P1"):
+        mlflow.log_param("modelo_seleccionado", modelo_seleccionado)
 
-    demanda_completa = completar_calendario_por_estacion(demanda)
-    demanda_completa = agregar_variables_historicas(demanda_completa)
+        viajes = cargar_viajes_p1()
+        demanda = construir_demanda_diaria(viajes)
 
-    columnas_modelo = ["Numero_viajes", *VARIABLES_HISTORICAS]
-    mascara_valida = demanda_completa[columnas_modelo].notna().all(axis=1)
-    print(f"\nRegistros totales tras completar calendario: {len(demanda_completa):,}")
-    print(f"Registros con variables completas: {mascara_valida.sum():,}")
-    print(f"Registros no utilizables: {(~mascara_valida).sum():,}")
-    print(
-        "Porcentaje utilizable: "
-        f"{mascara_valida.mean() * 100:.2f}%"
-    )
+        historial_estaciones = resumir_historial_estaciones(demanda)
+        estaciones_baja, resumen_huecos = analizar_huecos_por_estacion(
+            demanda, historial_estaciones
+        )
 
-    datos_validos, entrenamiento, prueba = separar_datos_cronologicamente(
-        demanda_completa
-    )
+        print("\nEstaciones con baja cobertura:")
+        print(
+            estaciones_baja.sort_values("Cobertura_pct")
+            .head(10)
+            .to_string(index=False)
+        )
 
-    # Baseline y modelos de un día adelante.
-    _, metricas_baseline = evaluar_baseline(entrenamiento, prueba)
-    _, metricas_lineal, coeficientes = entrenar_regresion_lineal(
-        entrenamiento, prueba
-    )
-    _, metricas_estacion = entrenar_regresion_con_estacion(
-        entrenamiento, prueba
-    )
-    modelo_ciclico, metricas_ciclicas = entrenar_regresion_ciclica(
-        entrenamiento, prueba
-    )
+        print("\nMayores intervalos sin registros:")
+        if not resumen_huecos.empty:
+            print(resumen_huecos.head(10).to_string(index=False))
 
-    print("\nCoeficientes de regresión lineal:")
-    print(coeficientes.to_string(index=False))
-    print("\nComparación de modelos de un día:")
-    print(pd.DataFrame([
-        {"Modelo": "Baseline", **metricas_baseline},
-        {"Modelo": "Regresión lineal", **metricas_lineal},
-        {"Modelo": "Regresión con estación", **metricas_estacion},
-        {"Modelo": "Regresión cíclica", **metricas_ciclicas},
-    ]).round(3).to_string(index=False))
+        demanda_completa = completar_calendario_por_estacion(demanda)
+        demanda_completa = agregar_variables_historicas(demanda_completa)
 
-    # Evaluación recursiva a siete días.
-    matriz_demanda = construir_matriz_demanda(demanda_completa)
-    pronosticos = pronosticar_siete_dias(matriz_demanda, modelo_ciclico)
-    evaluables, metricas_horizonte, metricas_globales, comparacion_7d = (
-        evaluar_pronostico_siete_dias(pronosticos, matriz_demanda)
-    )
+        columnas_modelo = ["Numero_viajes", *VARIABLES_HISTORICAS]
+        mascara_valida = demanda_completa[columnas_modelo].notna().all(axis=1)
 
-    print("\nPronósticos negativos:", int(
-        (pronosticos["Numero_viajes_predicho"] < 0).sum()
-    ))
+        print(
+            f"\nRegistros tras completar calendario: "
+            f"{len(demanda_completa):,}"
+        )
+        print(f"Registros con variables completas: {mascara_valida.sum():,}")
+        print(f"Registros no utilizables: {(~mascara_valida).sum():,}")
+        print(f"Porcentaje utilizable: {mascara_valida.mean() * 100:.2f}%")
 
-    # Se devuelven los principales objetos para facilitar su reutilización
-    # si el módulo se importa desde otro script o notebook.
-    return {
-        "demanda_diaria": demanda,
-        "historial_estaciones": historial_estaciones,
-        "demanda_completa": demanda_completa,
-        "datos_validos": datos_validos,
-        "entrenamiento": entrenamiento,
-        "prueba": prueba,
-        "metricas_baseline": metricas_baseline,
-        "metricas_lineal": metricas_lineal,
-        "metricas_estacion": metricas_estacion,
-        "metricas_ciclicas": metricas_ciclicas,
-        "coeficientes_lineal": coeficientes,
-        "modelo_ciclico": modelo_ciclico,
-        "pronosticos_7d": pronosticos,
-        "pronosticos_evaluables_7d": evaluables,
-        "metricas_horizonte_7d": metricas_horizonte,
-        "metricas_globales_7d": metricas_globales,
-        "comparacion_metricas_7d": comparacion_7d,
-    }
+        datos_validos, entrenamiento, prueba = separar_datos_cronologicamente(
+            demanda_completa
+        )
+
+        resultados.update({
+            "demanda_diaria": demanda,
+            "historial_estaciones": historial_estaciones,
+            "demanda_completa": demanda_completa,
+            "datos_validos": datos_validos,
+            "entrenamiento": entrenamiento,
+            "prueba": prueba,
+        })
+
+        ejecutar_todos = modelo_seleccionado == "todos"
+
+        if ejecutar_todos or modelo_seleccionado == "baseline":
+            _, metricas = evaluar_baseline(entrenamiento, prueba)
+            resultados["metricas_baseline"] = metricas
+
+        if ejecutar_todos or modelo_seleccionado == "lineal":
+            _, metricas, coeficientes = entrenar_regresion_lineal(
+                entrenamiento, prueba
+            )
+            resultados["metricas_lineal"] = metricas
+            resultados["coeficientes_lineal"] = coeficientes
+            print("\nCoeficientes de regresión lineal:")
+            print(coeficientes.to_string(index=False))
+
+        if ejecutar_todos or modelo_seleccionado == "estacion":
+            _, metricas = entrenar_regresion_con_estacion(
+                entrenamiento, prueba
+            )
+            resultados["metricas_estacion"] = metricas
+
+        necesita_ciclico = (
+            ejecutar_todos
+            or modelo_seleccionado in {"ciclico", "7_dias"}
+        )
+
+        if necesita_ciclico:
+            modelo_ciclico, metricas = entrenar_regresion_ciclica(
+                entrenamiento, prueba
+            )
+            resultados["modelo_ciclico"] = modelo_ciclico
+            resultados["metricas_ciclicas"] = metricas
+
+        if ejecutar_todos:
+            comparacion = [
+                {"Modelo": "Baseline", **resultados["metricas_baseline"]},
+                {"Modelo": "Regresión lineal", **resultados["metricas_lineal"]},
+                {
+                    "Modelo": "Regresión con estación",
+                    **resultados["metricas_estacion"],
+                },
+                {
+                    "Modelo": "Regresión cíclica",
+                    **resultados["metricas_ciclicas"],
+                },
+            ]
+            print("\nComparación de modelos de un día:")
+            print(pd.DataFrame(comparacion).round(3).to_string(index=False))
+
+        if ejecutar_todos or modelo_seleccionado == "7_dias":
+            matriz_demanda = construir_matriz_demanda(demanda_completa)
+            pronosticos = pronosticar_siete_dias(
+                matriz_demanda, resultados["modelo_ciclico"]
+            )
+
+            evaluables, metricas_horizonte, metricas_globales, comparacion_7d = (
+                evaluar_pronostico_siete_dias(pronosticos, matriz_demanda)
+            )
+
+            print(
+                "\nPronósticos negativos:",
+                int((pronosticos["Numero_viajes_predicho"] < 0).sum()),
+            )
+
+            resultados.update({
+                "pronosticos_7d": pronosticos,
+                "pronosticos_evaluables_7d": evaluables,
+                "metricas_horizonte_7d": metricas_horizonte,
+                "metricas_globales_7d": metricas_globales,
+                "comparacion_metricas_7d": comparacion_7d,
+            })
+
+    return resultados
 
 
 if __name__ == "__main__":
-    RESULTADOS_P1 = main()
+    parser = argparse.ArgumentParser(
+        description="Entrenamiento y evaluación de modelos P1 de MiBici."
+    )
+    parser.add_argument(
+        "--modelo",
+        choices=["baseline", "lineal", "estacion", "ciclico", "7_dias", "todos"],
+        default="todos",
+        help="Modelo que se ejecutará. Por defecto, ejecuta el flujo completo.",
+    )
+    args = parser.parse_args()
+    RESULTADOS_P1 = main(modelo_seleccionado=args.modelo)

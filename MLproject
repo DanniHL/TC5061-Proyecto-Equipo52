@@ -1,4 +1,3 @@
-
 name: mibici-equipo52
 
 python_env: python_env.yaml
@@ -26,20 +25,33 @@ entry_points:
         default: 0
       min_cluster_size:
         type: int
-        default: 0
+        default: 15
       solo_consolidadas:
         type: string
         default: "false"
       sin_redondos_cortos:
         type: string
         default: "false"
-    command: >-
-      python -m equipo52_module.project_train
-      --pregunta {pregunta}
-      --modelo {modelo}
-      --periodo {periodo}
-      --balanceado {balanceado}
-      --k {k}
-      --min-cluster-size {min_cluster_size}
-      --solo-consolidadas {solo_consolidadas}
-      --sin-redondos-cortos {sin_redondos_cortos}
+      max_iter:
+        type: int
+        default: 200
+      learning_rate:
+        type: float
+        default: 0.1
+      max_leaf_nodes:
+        type: int
+        default: 31
+
+    command: "
+    python -m equipo52_module.project_train
+    --pregunta {pregunta}
+    --modelo {modelo}
+    --periodo {periodo}
+    --balanceado {balanceado}
+    --k {k}
+    --min-cluster-size {min_cluster_size}
+    --solo-consolidadas {solo_consolidadas}
+    --sin-redondos-cortos {sin_redondos_cortos}
+    --max-iter {max_iter}
+    --learning-rate {learning_rate}
+    --max-leaf-nodes {max_leaf_nodes}"
