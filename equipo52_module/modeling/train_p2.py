@@ -5,15 +5,15 @@ las próximas 3 horas? Cada corrida entrena con un periodo (historia completa o 
 se valida con octubre de 2025 a marzo de 2026, se prueba con abril a septiembre de 2026 y
 registra parámetros, métricas y artefactos en MLflow.
 
-Uso:
-    python equipo52_module/modeling/train_p2.py --modelo base --periodo completo
-    python equipo52_module/modeling/train_p2.py --modelo hgb --periodo completo
-    python equipo52_module/modeling/train_p2.py --modelo hgb --periodo postcovid
-    python equipo52_module/modeling/train_p2.py --modelo hgb --periodo completo --balanceado
-    python equipo52_module/modeling/train_p2.py --modelo hgb --params "max_iter=300,learning_rate=0.05"
-    python equipo52_module/modeling/train_p2.py --modelo hgb --params "peso_fallas=3"
-    python equipo52_module/modeling/train_p2.py --modelo logistica --params "C=1.0,peso_fallas=3"
-    python equipo52_module/modeling/train_p2.py --modelo busqueda
+Uso con MLflow Project (como se registran las corridas de la entrega):
+    mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 \
+        -P pregunta=p2 -P modelo=hgb -P periodo=completo -P learning_rate=0.05 -P peso_fallas=5
+
+Uso directo para pruebas (mismas opciones que pasa el despachador project_train.py):
+    python -m equipo52_module.modeling.train_p2 --modelo base --periodo completo
+    python -m equipo52_module.modeling.train_p2 --modelo hgb --periodo completo --learning-rate 0.05 --peso-fallas 5
+    python -m equipo52_module.modeling.train_p2 --modelo logistica --peso-fallas 3 --params "C=0.5"
+    python -m equipo52_module.modeling.train_p2 --modelo busqueda --periodo completo
 """
 
 import hashlib
@@ -420,6 +420,57 @@ def parametros_comunes(modelo: str, periodo: str, partes: dict[str, pd.DataFrame
     }
 
 
+def resolver_hiperparametros(modelo: str, params: str, opciones: dict) -> dict:
+    """Hiperparámetros finales: valores por omisión, luego --params y luego las opciones explícitas.
+
+    Las opciones explícitas (--max-iter, --learning-rate, --max-leaf-nodes, --peso-fallas) son las que
+    pasa el MLproject. El despachador las manda siempre, así que se ignoran las que no aplican al
+    modelo (por ejemplo learning_rate en la logística) y, en la búsqueda, las que fija la rejilla.
+    """
+    if modelo == "base":
+        return {}
+    familia = "hgb" if modelo == "busqueda" else modelo
+    hiperparametros = leer_hiperparametros(familia, params)
+    for nombre, valor in opciones.items():
+        aplica = nombre in HIPERPARAMETROS[familia] and not (modelo == "busqueda" and nombre in REJILLA_BUSQUEDA)
+        if valor is not None and aplica:
+            hiperparametros[nombre] = type(HIPERPARAMETROS[familia][nombre])(valor)
+    return hiperparametros
+
+
+def mismo_valor(a, b) -> bool:
+    """Compara dos valores de parámetro como los guarda MLflow (texto): 5, 5.0 y "5" son el mismo valor."""
+    try:
+        return float(a) == float(b)
+    except (TypeError, ValueError):
+        return str(a) == str(b)
+
+
+def registrar_parametros(parametros: dict) -> None:
+    """Registra los parámetros de la corrida sin chocar con los que ya registró mlflow run.
+
+    Con mlflow run, la corrida ya trae los parámetros del MLproject (pregunta, modelo, periodo,
+    max_iter…) y MLflow no deja cambiar un parámetro registrado. Si el script trae el mismo nombre con
+    el mismo valor, se omite; si el valor es distinto, se registra como <nombre>_script, para que la
+    corrida no falle y la diferencia quede a la vista.
+    """
+    existentes = mlflow.get_run(mlflow.active_run().info.run_id).data.params
+    nuevos = {}
+    for nombre, valor in parametros.items():
+        if nombre not in existentes:
+            nuevos[nombre] = valor
+        elif not mismo_valor(existentes[nombre], valor):
+            nuevos[f"{nombre}_script"] = valor
+    mlflow.log_params(nuevos)
+
+
+def sufijo_hiperparametros(familia: str, hiperparametros: dict) -> str:
+    """Los hiperparámetros distintos de los valores por omisión, para el nombre de la corrida."""
+    distintos = [f"{nombre}{valor:g}" if isinstance(valor, float) else f"{nombre}{valor}"
+                 for nombre, valor in hiperparametros.items() if valor != HIPERPARAMETROS[familia][nombre]]
+    return "-" + "-".join(distintos) if distintos else ""
+
+
 def parametros_del_modelo(modelo: str, hiperparametros: dict, pesos: dict | str | None) -> dict:
     """Hiperparámetros con prefijo del modelo; peso_fallas sin prefijo para comparar familias en la misma columna."""
     parametros = {f"{modelo}_{nombre}": valor for nombre, valor in hiperparametros.items() if nombre != "peso_fallas"}
@@ -453,10 +504,9 @@ def carpeta_de_artefactos(carpeta: str) -> Path:
     return carpeta
 
 
-def correr_candidata(modelo: str, periodo: str, balanceado: bool, params: str,
+def correr_candidata(modelo: str, periodo: str, balanceado: bool, hiperparametros: dict,
                      tabla: pd.DataFrame, partes: dict[str, pd.DataFrame]) -> None:
     """Una corrida baseline o candidata: métricas de validación y prueba, artefactos y, si entrena, el modelo."""
-    hiperparametros = leer_hiperparametros(modelo, params) if modelo != "base" else {}
     pesos = pesos_por_clase(hiperparametros.get("peso_fallas", 1.0), balanceado)
     entrenamiento, validacion = partes["entrenamiento"], partes["validacion"]
     entrenamiento_final, prueba = partes["entrenamiento_final"], partes["prueba"]
@@ -482,13 +532,15 @@ def correr_candidata(modelo: str, periodo: str, balanceado: bool, params: str,
                 | calcular_metricas(real, prediccion, "test")
                 | {"segundos_entrenamiento": round(segundos, 1)})
 
-    nombre_corrida = f"p2-{modelo}{'-balanceado' if balanceado else ''}-{periodo}"
-    if params:  # por ejemplo p2-hgb-completo-max_iter300-learning_rate0.05
-        nombre_corrida += "-" + params.replace(" ", "").replace("=", "").replace(",", "-")
+    # Por ejemplo p2-hgb-completo-learning_rate0.05-peso_fallas5: el nombre dice qué cambió respecto a los valores por omisión.
+    nombre_corrida = (f"p2-{modelo}{'-balanceado' if balanceado else ''}-{periodo}"
+                      + (sufijo_hiperparametros(modelo, hiperparametros) if modelo != "base" else ""))
     with mlflow.start_run(run_name=nombre_corrida):
+        # Con mlflow run la corrida ya existe con un nombre al azar: se le pone el de la corrida.
+        mlflow.set_tag("mlflow.runName", nombre_corrida)
         etapa = "baseline" if modelo == "base" else "candidate"
         mlflow.set_tags(etiquetas(modelo, etapa))
-        mlflow.log_params(parametros)
+        registrar_parametros(parametros)
         mlflow.log_metrics(metricas)
 
         # Versión de los datos: MLflow guarda la descripción de cada conjunto (filas, columnas, huella y
@@ -559,17 +611,14 @@ def grafica_busqueda(resultados: pd.DataFrame, f1_base: float, ruta: Path) -> No
     plt.close(fig)
 
 
-def correr_busqueda(periodo: str, params: str, partes: dict[str, pd.DataFrame]) -> None:
+def correr_busqueda(periodo: str, base: dict, partes: dict[str, pd.DataFrame]) -> None:
     """Búsqueda de hiperparámetros de HGB con nested runs: una corrida padre y una hija por combinación.
 
     Cada hija entrena con entrenamiento y mide solo en validación: la prueba no se usa para elegir.
     El padre guarda la tabla de resultados, la gráfica y cuál fue la mejor hija; la mejor
-    combinación se corre después como candidata completa (con prueba y modelo).
+    combinación se corre después como candidata completa (con prueba y modelo). base trae los
+    hiperparámetros que no están en la rejilla (por ejemplo max_iter).
     """
-    base = leer_hiperparametros("hgb", params)  # --params cambia los hiperparámetros que no están en la rejilla
-    repetidos = set(REJILLA_BUSQUEDA) & {par.split("=")[0].strip() for par in filter(None, params.split(","))}
-    if repetidos:
-        raise typer.BadParameter(f"{', '.join(repetidos)} ya está en la rejilla de búsqueda")
     entrenamiento, validacion = partes["entrenamiento"], partes["validacion"]
     real_validacion = validacion["clase"].astype(int).to_numpy()
     f1_base = calcular_metricas(real_validacion, predecir_con_base(validacion), "val")["val_f1_fallas"]
@@ -578,12 +627,13 @@ def correr_busqueda(periodo: str, params: str, partes: dict[str, pd.DataFrame]) 
 
     resultados = []
     with mlflow.start_run(run_name=nombre_padre) as padre:
+        mlflow.set_tag("mlflow.runName", nombre_padre)  # con mlflow run, la corrida padre es la del proyecto
         parametros = parametros_comunes("busqueda", periodo, partes) | {
             "rejilla": json.dumps(REJILLA_BUSQUEDA), "combinaciones": len(combinaciones),
             "metrica_seleccion": "val_f1_fallas"}
         parametros.update({f"hgb_{nombre}": valor for nombre, valor in base.items() if nombre not in REJILLA_BUSQUEDA})
         mlflow.set_tags(etiquetas("hgb", "search"))
-        mlflow.log_params(parametros)
+        registrar_parametros(parametros)
         columnas = VARIABLES + ["clase"]
         mlflow.log_input(conjunto_para_mlflow(entrenamiento[columnas], f"p2-entrenamiento-sin-validacion-{periodo}",
                                               parametros["huella_manifiesto"]), context="training")
@@ -622,33 +672,42 @@ def correr_busqueda(periodo: str, params: str, partes: dict[str, pd.DataFrame]) 
             mlflow.log_artifacts(carpeta)
 
     logger.info("\n" + resultados.round(3).to_string(index=False))
-    sugerida = ",".join(f"{nombre}={valor}" for nombre, valor in mejor_combinacion.items())
-    logger.success(f"Búsqueda {nombre_padre} ({padre.info.run_id}) registrada. Mejor combinación: {sugerida} · "
-                   f"val_f1_fallas {mejor['val_f1_fallas']:.3f} (baseline {f1_base:.3f}). Siguiente paso: "
-                   f'--modelo hgb --params "{sugerida}"')
+    opciones = " ".join(f"-P {nombre}={valor:g}" for nombre, valor in mejor_combinacion.items())
+    logger.success(f"Búsqueda {nombre_padre} ({padre.info.run_id}) registrada. Mejor combinación: {mejor_combinacion} · "
+                   f"val_f1_fallas {mejor['val_f1_fallas']:.3f} (baseline {f1_base:.3f}). Siguiente paso, la candidata: "
+                   f"mlflow run . -e train -P pregunta=p2 -P modelo=hgb -P periodo={periodo} {opciones}")
 
 
 @app.command()
 def main(modelo: str = typer.Option("hgb", help="base, hgb, logistica o busqueda (búsqueda de HGB con nested runs)"),
          periodo: str = typer.Option("completo", help="completo o postcovid"),
          balanceado: bool = typer.Option(False, help="dar a las fallas el mismo peso que a las horas normales"),
-         params: str = typer.Option("", help='hiperparámetros, por ejemplo "max_iter=300,peso_fallas=3"')):
+         max_iter: int = typer.Option(None, help="iteraciones de HGB o de la logística"),
+         learning_rate: float = typer.Option(None, help="tasa de aprendizaje de HGB"),
+         max_leaf_nodes: int = typer.Option(None, help="hojas por árbol de HGB"),
+         peso_fallas: float = typer.Option(None, help="peso de cada hora de falla frente a una normal"),
+         params: str = typer.Option("", help='otros hiperparámetros, por ejemplo "C=0.5" o "min_samples_leaf=50"')):
+    # Las opciones --max-iter, --learning-rate, --max-leaf-nodes y --peso-fallas son las del MLproject; el
+    # despachador project_train.py las manda siempre, también al baseline, que no las usa.
     if modelo not in FAMILIAS and modelo != "busqueda":
         raise typer.BadParameter("modelo debe ser base, hgb, logistica o busqueda")
     if modelo == "base" and (params or balanceado):
         raise typer.BadParameter("el baseline no tiene hiperparámetros ni pesos")
-    if modelo == "busqueda" and balanceado:
-        raise typer.BadParameter("la búsqueda ya explora los pesos con peso_fallas")
-    leer_hiperparametros("hgb" if modelo == "busqueda" else modelo, params) if modelo != "base" else None  # valida antes de cargar datos
-    logger.info(f"P2 · modelo {modelo} · entrenamiento desde {INICIOS_ENTRENAMIENTO[periodo]} · prueba desde {INICIO_PRUEBA}")
+    if modelo == "busqueda" and (balanceado or set(REJILLA_BUSQUEDA) & {p.split("=")[0].strip() for p in params.split(",") if p}):
+        raise typer.BadParameter("la búsqueda ya explora peso_fallas y learning_rate con su rejilla")
+    opciones = {"max_iter": max_iter, "learning_rate": learning_rate, "max_leaf_nodes": max_leaf_nodes,
+                "peso_fallas": peso_fallas}
+    hiperparametros = resolver_hiperparametros(modelo, params, opciones)  # valida antes de cargar datos
+    logger.info(f"P2 · modelo {modelo} · {hiperparametros or 'sin hiperparámetros'} · "
+                f"entrenamiento desde {INICIOS_ENTRENAMIENTO[periodo]} · prueba desde {INICIO_PRUEBA}")
 
     tabla, partes = preparar_datos(periodo)
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(MLFLOW_EXPERIMENT)
     if modelo == "busqueda":
-        correr_busqueda(periodo, params, partes)
+        correr_busqueda(periodo, hiperparametros, partes)
     else:
-        correr_candidata(modelo, periodo, balanceado, params, tabla, partes)
+        correr_candidata(modelo, periodo, balanceado, hiperparametros, tabla, partes)
 
 
 if __name__ == "__main__":
