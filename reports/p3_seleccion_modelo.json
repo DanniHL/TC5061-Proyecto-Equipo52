@@ -1,0 +1,40 @@
+{
+  "pregunta": "p3",
+  "modelo_registrado": "mibici-equipo52-p3-grupos",
+  "fecha": "2026-10-25T19:50:00",
+  "experimento": "mibici-equipo52",
+  "regla": "champion: K-Means k=4 sobre las 42 características de uso (segundo punto de inflexión de silueta que iguala el índice de Davies-Bouldin del óptimo global y desagrega la dirección del flujo y la franja horaria pico en 4 perfiles accionables para planeación y rebalanceo); challenger: K-Means k=2 sobre las 42 características (máximo matemático global de silueta y estabilidad para segmentación macro de la red)",
+  "baseline": {
+    "run_id": "2a4ec8090ed74f2ca99bbc3a5160ed8d",
+    "corrida": "p3-geo-k5",
+    "val_silhouette": 0.039,
+    "hist_silhouette": 0.0189,
+    "estabilidad_eras_ari": 1.0,
+    "estabilidad_bootstrap_ari": 0.9148
+  },
+  "champion": {
+    "run_id": "f1721278a8f44272ac05bae27b51fe1b",
+    "corrida": "p3-kmeans-k4",
+    "familia": "kmeans",
+    "k": 4,
+    "val_silhouette": 0.1313,
+    "hist_silhouette": 0.1052,
+    "estabilidad_eras_ari": 0.5712,
+    "estabilidad_bootstrap_ari": 0.8414,
+    "mejora_test_puntos": 0.0863,
+    "mejora_test_pct": 457.7
+  },
+  "challenger": {
+    "run_id": "216c28c7b78d4d5db65011850b9295a6",
+    "corrida": "p3-kmeans-k2",
+    "familia": "kmeans",
+    "k": 2,
+    "val_silhouette": 0.1453,
+    "hist_silhouette": 0.1507,
+    "estabilidad_eras_ari": 0.6179,
+    "estabilidad_bootstrap_ari": 0.9519,
+    "mejora_test_puntos": 0.1318,
+    "mejora_test_pct": 698.6
+  },
+  "justificacion": "K-Means con k=4 (p3-kmeans-k4) multiplica por 5.6 la silueta en el espacio de uso respecto al baseline geográfico (0.105 contra 0.019, +457.7 %; 0.131 contra 0.039 en las 371 estaciones consolidadas), alcanza el menor índice de Davies-Bouldin en validación (2.075 contra 2.982 del baseline) e iguala al óptimo global en la red completa (2.309 contra 3.267 del baseline), mantiene alta estabilidad temporal entre eras (ARI = 0.571) y por remuestreo bootstrap (ARI = 0.841), y es el único corte compacto que separa los 4 regímenes operativos que necesita MiBici (núcleo central receptor, polos de empleo con vaciado vespertino 17-19 h, zonas residenciales emisoras matutinas 7-9 h y expansión periférica recreativa de fin de semana). K-Means con k=2 (p3-kmeans-k2) queda como challenger por tener la mayor silueta global (0.151) y estabilidad bootstrap (0.952) para diagnóstico macro."
+}
