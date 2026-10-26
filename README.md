@@ -204,6 +204,48 @@ Los scripts de entrenamiento utilizan la variable `MLFLOW_TRACKING_URI`, configu
 - Los PR se unen con *merge commit* (sin *squash*) para conservar quién hizo cada commit.
 - Los notebooks se nombran `número-iniciales-descripción.ipynb`, por ejemplo `1.0-rr-p2-exploracion-datos.ipynb`.
 
+## Registro y selección de modelo en MLflow
+El uso de MLflow permite mantener la relación entre el modelo registrado, su corrida de origen y las métricas utilizadas para evaluarlo. El alias champion representa la versión seleccionada por el equipo y puede actualizarse cuando una nueva versión demuestre un mejor desempeño conforme a los criterios de evaluación definidos.
+
+### P1
+Para la pregunta P1, se seleccionó una regresión lineal con variables cíclicas del calendario y preprocesamiento mediante StandardScaler, con el objetivo de predecir la demanda diaria de viajes de MiBici.
+
+El modelo se registró en MLflow Model Registry con el nombre 
+```bash
+mibici-equipo52-p1-demanda. 
+```
+La versión 1 se identificó con el alias champion, que permite recuperar la versión seleccionada sin depender de un número de versión fijo en el código.
+
+La selección se basó en la evaluación con datos de prueba. El modelo obtuvo un MAE de 6.6464 y un RMSE de 11.3658, mejorando los resultados del modelo de persistencia utilizado como línea base. La corrida de origen fue Pipeline_Regresion_Ciclica_P1, con identificador db35a9caee2b4d25bc6ea3faee674842.
+
+Para cargar el modelo registrado mediante su alias:
+```bash
+import mlflow.sklearn
+
+modelo = mlflow.sklearn.load_model(
+    "models:/mibici-equipo52-p1-demanda@champion"
+)
+```
+
+### P2
+Para la pregunta P2
+El modelo se registró en MLflow Model Registry con el nombre 
+```bash
+mibici-equipo52-p2-riesgo. 
+```
+La versión 1 se identificó con el alias champion, que permite recuperar la versión seleccionada sin depender de un número de versión fijo en el código.
+L
+a versión seleccionada se identifica mediante el alias champion, de modo que pueda cargarse sin depender de un número de versión específico:
+```bash
+import mlflow.sklearn
+
+modelo = mlflow.sklearn.load_model(
+    "models:/mibici-equipo52-p2-riesgo@champion"
+)
+```
+
+### P3
+
 ## Estructura del proyecto
 
 ```
