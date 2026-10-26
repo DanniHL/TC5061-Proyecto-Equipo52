@@ -159,27 +159,62 @@ Se usan aliases y no etapas porque MLflow declaró obsoletas las etapas (`Stagin
 
 **Pruebas rápidas sin MLflow Project** (solo para depurar; no cuentan para la entrega): `python -m equipo52_module.modeling.train_p2 --modelo hgb --peso-fallas 3`. Los notebooks `2.1` y `2.2` explican la partición y cómo leer las corridas desde Python.
 
-### Experimento base de P3
+### P3 · Experimentos y modelo en producción (semana 6)
 
-Requiere haber corrido la ingesta. Desde la carpeta del proyecto:
+Requiere haber corrido la ingesta (`mlflow run . -e ingest --env-manager local --experiment-name mibici-equipo52`) y tener encendido el servidor de MLflow (ver «Ver los experimentos en MLflow»). En la terminal donde se lanzan las corridas:
 
 ```bash
-python equipo52_module/modeling/train_p3.py --modelo geo
-python equipo52_module/modeling/train_p3.py --modelo kmeans
-python equipo52_module/modeling/train_p3.py --modelo kmeans --k 4
-python equipo52_module/modeling/train_p3.py --modelo kmeans --k 4 --solo-consolidadas
-python equipo52_module/modeling/train_p3.py --modelo ward
-python equipo52_module/modeling/train_p3.py --modelo hdbscan
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
 ```
 
-- `geo`: línea base. K-Means con k = 5 solo sobre latitud y longitud; su silueta se mide en el espacio de las 42 características de uso (`hist_silhouette = 0.019`), para comprobar si las zonas geográficas son coherentes en comportamiento.
-- `kmeans`: candidato principal sobre las 469 estaciones activas y 42 características de uso calculadas con toda la historia; elige k por silueta en el barrido 2-12 (`k = 2`, `hist_silhouette = 0.151`, 8× la línea base) o fijo con `--k 4` para obtener los 4 perfiles operativos de planeación (`hist_silhouette = 0.105`).
-- `--solo-consolidadas`: ajusta el escalador y los centroides únicamente con las 371 estaciones consolidadas ($> 6$ meses activas, `consolidadas_silhouette = 0.127` en $k = 4$) y asigna las 98 estaciones abiertas en 2026 al centroide más cercano; `--sin-redondos-cortos` descarta viajes `Origen_Id == Destino_Id` de 1 a 3 min.
-- `ward`: agrupamiento jerárquico con enlace Ward al mismo procedimiento de k (`hist_silhouette = 0.129`); reporta el ARI de concordancia con K-Means (`0.565`) y el dendrograma.
-- `hdbscan`: diagnóstico de densidad (`--min-cluster-size`, 15 por omisión). Muestra que las estaciones forman un continuo urbano y no islas aisladas, e identifica las estaciones más atípicas.
-- Para los candidatos se reporta la estabilidad: `estabilidad_eras_ari` compara la asignación de las 274 estaciones activas en ambas mitades de la historia (corte `2020-09-01`, ARI = `0.618` en $k = 2$ y `0.571` en $k = 4$) y `estabilidad_bootstrap_ari` re-entrena 30 veces con el 80 % de las estaciones (ARI = `0.952` en $k = 2$ y `0.841` en $k = 4$).
+Todas las corridas de P3 se lanzan con `mlflow run` en el experimento `mibici-equipo52`:
 
-Cada corrida se registra en `mibici-equipo52` con fechas, versión y huella de datos, semilla, hiperparámetros, métricas `hist_*` y de estabilidad, etiquetas (equipo, pregunta, commit) y artefactos (mapa de grupos, perfiles horarios, silueta por k, dendrograma, matriz estación × característica y descripción de grupos con desglose por municipio `GDL`/`ZPN`/`TLQ`). La matriz y las descripciones quedan en `data/processed/` y las figuras en `reports/figures/`.
+**Validación y evaluación en toda la red.** Se mide la cohesión y separación en las 371 estaciones consolidadas ($> 6$ meses activas, `val_silhouette`) y en las 469 estaciones activas de toda la red incluyendo las 98 abiertas en mayo–agosto de 2026 (`hist_silhouette`, `hist_davies_bouldin`, `hist_calinski_harabasz`), junto con la estabilidad temporal entre eras (`estabilidad_eras_ari`, corte `2020-09-01` sobre las 274 estaciones comunes) y por remuestreo (`estabilidad_bootstrap_ari`, 30 remuestreos al 80 %).
+
+**1. Baseline** (K-Means con $k = 5$ solo sobre latitud y longitud, evaluado en el espacio de las 42 características de uso):
+
+```bash
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p3 -P modelo=geo
+```
+
+**2. Búsqueda de hiperparámetros con nested runs** (K-Means; una corrida padre `p3-busqueda-kmeans` y 10 hijas: `k` de 2 a 6 × `solo_consolidadas` `False` y `True`):
+
+```bash
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p3 -P modelo=busqueda
+```
+
+**3. Candidatas** (óptimo operativo de 4 perfiles `k = 4`, óptimo global macro `k = 2`, variante de ajuste en estaciones consolidadas, agrupamiento jerárquico `ward` y densidad `hdbscan`):
+
+```bash
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p3 -P modelo=kmeans -P k=4
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p3 -P modelo=kmeans -P k=2
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p3 -P modelo=kmeans -P k=4 -P solo_consolidadas=true
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p3 -P modelo=ward
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p3 -P modelo=hdbscan -P min_cluster_size=15
+```
+
+- `kmeans` ($k = 4$, `p3-kmeans-k4`): candidato elegido (`champion`); cuadruplica la resolución del corte macro y multiplica por 5.6 la silueta del baseline (`hist_silhouette = 0.105` vs. `0.019`, `val_silhouette = 0.131` vs. `0.039`, `Davies-Bouldin = 2.075` en validación y `2.309` en la red completa), separando los 4 perfiles operativos de planeación (núcleo central receptor, polos de empleo con vaciado vespertino 17–19 h, zonas residenciales emisoras matutinas 7–9 h y expansión periférica recreativa dominical).
+- `kmeans` ($k = 2$, `p3-kmeans-k2`): `challenger`; alcanza el máximo matemático global de silueta (`hist_silhouette = 0.151`, `val_silhouette = 0.145`, `estabilidad_bootstrap_ari = 0.952`, `estabilidad_eras_ari = 0.618`) para segmentación macro de la red.
+- `solo_consolidadas=true` (`p3-kmeans-k4-consolidadas`): ajusta el escalador y los centroides con las 371 estaciones consolidadas ($> 6$ meses, `val_silhouette = 0.127`) y proyecta las 98 estaciones abiertas en 2026.
+- `ward` (`p3-ward-k2`): agrupamiento jerárquico con enlace Ward (`hist_silhouette = 0.129`, `estabilidad_eras_ari = 0.648`, dendrograma y concordancia con K-Means `ARI = 0.565`).
+- `hdbscan` (`p3-hdbscan-mcs15`): diagnóstico de densidad que confirma el continuo urbano de la red e identifica estaciones atípicas.
+
+**4. Selección.** El notebook `notebooks/3.2-js-p3-mlflow-seleccion-modelo.ipynb` comprueba que las corridas oficiales de `mlflow run` coincidan con la referencia del notebook `3.1`, revisa los artefactos y la búsqueda con nested runs, compara las candidatas con los cuatro criterios de la actividad y respalda la decisión en `reports/p3_seleccion_modelo.json`.
+
+**5. Registro y paso a producción.** Registra el modelo elegido y el challenger como versiones de `mibici-equipo52-p3-grupos` con su linaje (experimento, corrida de origen, commit, versión y huella de datos), asigna los alias `champion` (producción) y `challenger` (siguiente mejor) y verifica la carga desde producción:
+
+```bash
+python -m equipo52_module.modeling.registrar_p3
+```
+
+El modelo en producción se carga siempre por su nombre y alias, lo que desacopla el código de inferencia de la versión activa y permite revertir o actualizar el modelo reasignando el alias (esquema vigente de MLflow desde que las etapas clásicas fueron declaradas obsoletas en MLflow 2.9):
+
+```python
+import mlflow
+modelo = mlflow.pyfunc.load_model("models:/mibici-equipo52-p3-grupos@champion")
+```
+
+**Qué registra cada corrida de P3 en `mibici-equipo52`:** fechas, versión y huella de datos, semilla e hiperparámetros; métricas `val_*`, `hist_*`, `estabilidad_eras_ari`, `estabilidad_bootstrap_ari` y `segundos_entrenamiento`; etiquetas `equipo`, `pregunta`, `commit`, `question`, `model_family` y `stage_of_work` (`baseline`, `search` o `candidate`); conjuntos de estaciones con `mlflow.log_input`; artefactos en `plots/` (mapa de grupos, perfiles horarios, silueta por $k$, dendrograma), `data/` (manifiesto de datos, matriz estación × característica y descripción de grupos con desglose por municipio `GDL`/`ZPN`/`TLQ`) y `config/` (configuración de la corrida y del proyecto), y el modelo con firma y ejemplo de entrada.
 
 
 ### Ver los experimentos en MLflow
@@ -266,8 +301,12 @@ modelo = mlflow.sklearn.load_model(
     └── 1.0-rr-p2-exploracion-datos.ipynb
     └── 1.1-rr-p2-exploracion-estaciones.ipynb
     └── 1.2-rr-p2-exploracion-flujo-neto.ipynb
+    └── 2.1-rr-p2-particion-validacion.ipynb
+    └── 2.2-rr-p2-mlflow-corridas-artefactos.ipynb
+    └── 2.3-rr-p2-seleccion-modelo.ipynb
     └── 3.0-js-p3-exploracion-estaciones.ipynb
     └── 3.1-js-p3-agrupamiento.ipynb
+    └── 3.2-js-p3-mlflow-seleccion-modelo.ipynb
 ├── pyproject.toml     <- Datos del paquete equipo52_module y configuración de herramientas
 ├── references         <- Diccionarios de datos, manuales y material de consulta
 │   ├── manifiesto_datos.csv
@@ -284,6 +323,8 @@ modelo = mlflow.sklearn.load_model(
     ├── modeling
     │   ├── __init__.py
     │   ├── predict.py <- Predicciones con modelos entrenados
+    │   ├── registrar_p2.py
+    │   ├── registrar_p3.py
     │   ├── train_p1.py
     │   ├── train_p2.py
     │   ├── train_p3.py
