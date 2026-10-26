@@ -1,0 +1,29 @@
+{
+  "pregunta": "p2",
+  "modelo_registrado": "mibici-equipo52-p2-riesgo",
+  "fecha": "2026-10-24T16:58:51",
+  "experimento": "mibici-equipo52",
+  "regla": "champion: mayor val_f1_fallas, confirmado contra el baseline en prueba; challenger: siguiente mejor en validación que también supera al baseline en prueba",
+  "baseline": {
+    "run_id": "935914fde71746ddb22bbb7a228500e4",
+    "val_f1_fallas": 0.4417,
+    "test_f1_fallas": 0.4045
+  },
+  "champion": {
+    "run_id": "d40ea0ba5c6247a79477c804de672cb2",
+    "corrida": "p2-hgb-completo-peso_fallas3",
+    "familia": "hgb",
+    "val_f1_fallas": 0.4827,
+    "test_f1_fallas": 0.4486,
+    "mejora_test_puntos": 0.0441
+  },
+  "challenger": {
+    "run_id": "be8172dd139d45d2ba201ee23c9eeb1c",
+    "corrida": "p2-hgb-postcovid-peso_fallas3",
+    "familia": "hgb",
+    "val_f1_fallas": 0.4802,
+    "test_f1_fallas": 0.4439,
+    "mejora_test_puntos": 0.0394
+  },
+  "justificacion": "HGB con historia completa y peso_fallas=3 mejora 10.9 % al baseline en prueba (F1 de fallas 0.449 contra 0.405), anticipa más fallas con precisión parecida y es estable; HGB Post-Covid queda como challenger por ser casi igual de bueno y 6.4 veces más barato de entrenar."
+}

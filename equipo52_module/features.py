@@ -7,6 +7,8 @@ una variable de la hora t solo usa datos de horas anteriores a t.
 
 import pandas as pd
 
+from equipo52_module.config import INICIO_POSTCOVID
+
 # =====================================================================================
 # P2 · Riesgo de que una estación se quede sin bicicletas o sin anclajes libres
 # Regla definida en notebooks/1.2-rr-p2-exploracion-flujo-neto.ipynb
@@ -151,7 +153,6 @@ def construir_tabla_p2(viajes: pd.DataFrame, estaciones: pd.DataFrame, horas: in
 # dieron de baja y 100 abrieron en 2026), los conteos se dividen entre sus meses activos y
 # las firmas temporales son proporciones: así una estación nueva compite parejo con una de 2014.
 
-INICIO_POSTCOVID = pd.Timestamp("2023-05-09")  # fin de la emergencia sanitaria (misma fecha que P2)
 SEGUNDOS_REDONDO_CORTO = 180  # umbral para separar devolución tardía (1-3 min) de paseo redondo real
 
 
@@ -281,11 +282,11 @@ def evolucion_historica(viajes: pd.DataFrame, primer_viaje: pd.Series, meses_act
     inicio_12m = fin - pd.DateOffset(months=12)
     salidas = viajes.groupby("Origen_Id").size()
     salidas_12m = viajes[viajes["Inicio_del_viaje"] >= inicio_12m].groupby("Origen_Id").size()
-    salidas_post = viajes[viajes["Inicio_del_viaje"] >= INICIO_POSTCOVID].groupby("Origen_Id").size()
+    salidas_post = viajes[viajes["Inicio_del_viaje"] >= pd.Timestamp(INICIO_POSTCOVID)].groupby("Origen_Id").size()
 
     share_12m = (salidas_12m / salidas).reindex(meses_activa.index, fill_value=0)
     share_post = (salidas_post / salidas).reindex(meses_activa.index, fill_value=0)
-    inicio_post = primer_viaje.clip(lower=INICIO_POSTCOVID)
+    inicio_post = primer_viaje.clip(lower=pd.Timestamp(INICIO_POSTCOVID))
     meses_post = meses_entre(inicio_post, fin).clip(upper=meses_activa)
     share_esperado = meses_post / meses_activa
     return pd.DataFrame({

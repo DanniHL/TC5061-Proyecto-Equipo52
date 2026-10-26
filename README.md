@@ -102,23 +102,62 @@ python equipo52_module/modeling/train_p1.py
 Las corridas deben mantener el mismo criterio de evaluación para que la comparación sea consistente. Los resultados permitirán determinar si los modelos de regresión aportan una mejora frente a la persistencia y si su precisión resulta útil para la planeación operativa de MiBici.
 
 
-### Experimento base de P2
+### P2 · Experimentos y modelo en producción (semana 6)
 
-Requiere haber corrido la ingesta. Desde la carpeta del proyecto:
+Requiere haber corrido la ingesta y tener encendido el servidor de MLflow (ver «Ver los experimentos en MLflow»). En la terminal donde se lanzan las corridas:
 
 ```bash
-python equipo52_module/modeling/train_p2.py --modelo base --periodo completo
-python equipo52_module/modeling/train_p2.py --modelo hgb --periodo completo
-python equipo52_module/modeling/train_p2.py --modelo hgb --periodo postcovid
-python equipo52_module/modeling/train_p2.py --modelo hgb --periodo completo --balanceado
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
 ```
 
-- `base`: repite lo que pasó en las últimas 4 semanas a la misma hora y día (falla si ocurrió en 2 o más).
-- `hgb`: HistGradientBoosting de scikit-learn con calendario, capacidad, ubicación, movimientos de las horas anteriores y fallas de las últimas 4 semanas.
-- `completo` entrena desde 2014-12-01 y `postcovid` desde 2023-05-09; las dos se prueban con abril a septiembre de 2026.
-- `--balanceado` da a las fallas el mismo peso que a las horas normales (más fallas detectadas, más alertas falsas).
+Todas las corridas de la entrega se lanzan con `mlflow run`. `--env-manager local` usa el entorno virtual activo (Python 3.12 con las versiones de `requirements.txt`) y `--experiment-name` hace que la corrida del proyecto nazca en `mibici-equipo52`, el mismo experimento de la entrega anterior.
 
-Cada corrida se registra en el experimento `mibici-equipo52` con fechas, versión y huella de datos, semilla, hiperparámetros, métricas `test_*`, etiquetas (equipo, pregunta, commit) y artefactos (tabla de aciertos y errores, porcentaje de clases por año y el modelo).
+**Partición en el tiempo.** Entrenamiento desde 2014-12-01 (o desde 2023-05-09 en `postcovid`) hasta septiembre de 2025, validación de octubre de 2025 a marzo de 2026 y prueba de abril a septiembre de 2026. Se elige con validación (`val_*`) y se confirma con prueba (`test_*`). El modelo final se reentrena con entrenamiento + validación: es el mismo periodo de la entrega anterior, así que las métricas de prueba se comparan directo con el baseline.
+
+**1. Baseline** (repite lo que pasó en las últimas 4 semanas a la misma hora y día):
+
+```bash
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p2 -P modelo=base -P periodo=completo
+```
+
+**2. Búsqueda de hiperparámetros con nested runs** (HistGradientBoosting; una corrida padre y 8 hijas: `peso_fallas` 2, 3, 5 y 8 × `learning_rate` 0.05 y 0.1; cada hija se mide solo en validación):
+
+```bash
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p2 -P modelo=busqueda -P periodo=completo
+```
+
+**3. Candidatas** con la mejor combinación de la búsqueda (`peso_fallas = 3`, `learning_rate = 0.1`, F1 de fallas en validación 0.483 contra 0.442 del baseline):
+
+```bash
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p2 -P modelo=hgb -P periodo=completo -P learning_rate=0.1 -P peso_fallas=3
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p2 -P modelo=logistica -P periodo=completo -P peso_fallas=3
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p2 -P modelo=hgb -P periodo=postcovid -P learning_rate=0.1 -P peso_fallas=3
+```
+
+- `hgb`: HistGradientBoosting con calendario, capacidad, ubicación, movimientos de las horas anteriores y fallas de las últimas 4 semanas.
+- `logistica`: regresión logística (imputación por mediana, estandarización); más simple y con coeficientes interpretables.
+- `peso_fallas`: cuánto pesa cada hora de falla frente a una normal al entrenar. Con 1 el modelo da pocas alertas y se le escapan muchas fallas; con `balanceado=true` (18 a 19 veces) da demasiadas alertas falsas.
+
+**4. Selección.** El notebook `notebooks/2.3-rr-p2-seleccion-modelo.ipynb` compara las candidatas contra el baseline (mejora, F1 de fallas, estabilidad y costo) y guarda la decisión en `reports/p2_seleccion_modelo.json`.
+
+**5. Registro y paso a producción.** Registra el modelo elegido como `mibici-equipo52-p2-riesgo` con su linaje (corrida, commit, versión de datos), pone los alias `champion` (producción) y `challenger` (siguiente mejor) y prueba la carga:
+
+```bash
+python -m equipo52_module.modeling.registrar_p2
+```
+
+El modelo en producción se carga siempre por su alias, así que cambiar de versión no requiere cambiar el código que lo usa:
+
+```python
+import mlflow
+modelo = mlflow.pyfunc.load_model("models:/mibici-equipo52-p2-riesgo@champion")
+```
+
+Se usan aliases y no etapas porque MLflow declaró obsoletas las etapas (`Staging`, `Production`) desde la versión 2.9.
+
+**Qué registra cada corrida en `mibici-equipo52`:** fechas, versión y huella de datos, semilla e hiperparámetros; métricas `val_*`, `test_*` y `segundos_entrenamiento`; etiquetas `equipo`, `pregunta`, `commit`, `question`, `model_family` y `stage_of_work` (`baseline`, `search` o `candidate`); conjuntos de entrenamiento y prueba con `mlflow.log_input`; artefactos en `plots/` (matriz de confusión, curva precisión-recall), `data/` (manifiesto de datos, tablas) y `config/` (configuración de la corrida), y el modelo con firma y ejemplo de entrada.
+
+**Pruebas rápidas sin MLflow Project** (solo para depurar; no cuentan para la entrega): `python -m equipo52_module.modeling.train_p2 --modelo hgb --peso-fallas 3`. Los notebooks `2.1` y `2.2` explican la partición y cómo leer las corridas desde Python.
 
 ### Experimento base de P3
 
