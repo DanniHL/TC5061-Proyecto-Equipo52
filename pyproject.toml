@@ -1,3 +1,4 @@
+
 [build-system]
 requires = ["flit_core >=3.2,<4"]
 build-backend = "flit_core.buildapi"
@@ -30,3 +31,10 @@ extend-select = ["I"]  # Add import sorting
 known-first-party = ["equipo52_module"]
 force-sort-within-sections = true
 
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra"
