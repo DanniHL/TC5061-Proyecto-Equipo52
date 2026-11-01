@@ -1,0 +1,10 @@
+# Entorno aparte para la validación de datos con DeepChecks (.venv-calidad).
+# deepchecks 0.19.1 no funciona con el NumPy 2 ni con el scikit-learn 1.9 que usa el
+# proyecto, así que fija versiones anteriores a propósito. Se instala con `make entorno-calidad`.
+deepchecks==0.19.1
+numpy==1.26.4
+pandas==2.2.3
+pyarrow==18.1.0
+scikit-learn==1.5.2
+setuptools==80.10.2   # deepchecks importa pkg_resources, que setuptools quitó en la versión 81
+anywidget==0.9.21     # los reportes HTML de deepchecks usan FigureWidget de plotly

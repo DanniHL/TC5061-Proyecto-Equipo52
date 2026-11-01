@@ -200,9 +200,10 @@ mlflow.db
 !/models/.gitkeep
 
 
-# Entornos virtuales
+# Entornos virtuales (incluido .venv-calidad, el entorno aparte de DeepChecks)
 .venv/
 .venv-test/
+.venv-calidad/
 venv/
 
 # Archivos de respaldo
