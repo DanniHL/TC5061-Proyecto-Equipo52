@@ -91,8 +91,8 @@ entorno-calidad: .venv-calidad/bin/python
 ## Corre bandit sobre el código del módulo y pip-audit sobre requirements.txt
 .PHONY: seguridad
 seguridad:
-	bandit -r equipo52_module -ll
-	pip-audit -r requirements.txt --no-deps
+	$(PYTHON_INTERPRETER) -m bandit -r equipo52_module -ll
+	$(PYTHON_INTERPRETER) -m pip_audit -r requirements.txt --no-deps
 
 
 ## Corre todo lo anterior con un solo comando

@@ -7,4 +7,4 @@ pandas==2.2.3
 pyarrow==18.1.0
 scikit-learn==1.5.2
 setuptools==80.10.2   # deepchecks importa pkg_resources, que setuptools quitó en la versión 81
-anywidget==0.9.21     # los reportes HTML de deepchecks usan FigureWidget de plotly
+plotly==5.24.1        # deepchecks serializa las gráficas de los reportes HTML con plotly 5

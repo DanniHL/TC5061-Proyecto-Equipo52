@@ -204,6 +204,8 @@ mlflow.db
 .venv/
 .venv-test/
 .venv-calidad/
+# Reportes HTML generados por DeepChecks (se regeneran con make test-datos)
+/reports/calidad/
 venv/
 
 # Archivos de respaldo

@@ -123,10 +123,16 @@ def main() -> None:
     print(json.dumps(resultados, indent=2, ensure_ascii=False, default=str)[:3000])
 
     # ------------------------------------------------- reportes HTML para la documentación
+    # deepchecks crea copias "nombre (N).html" si el archivo ya existe: se borran antes
     CARPETA_REPORTES.mkdir(parents=True, exist_ok=True)
-    data_integrity().run(ds_viajes).save_as_html(str(CARPETA_REPORTES / "integridad_viajes.html"))
+    for reporte in ["integridad_viajes.html", "drift_entrenamiento_prueba.html"]:
+        (CARPETA_REPORTES / reporte).unlink(missing_ok=True)
+    data_integrity().run(ds_viajes).save_as_html(
+        str(CARPETA_REPORTES / "integridad_viajes.html"), as_widget=False
+    )
     train_test_validation().run(ds_entrenamiento, ds_prueba).save_as_html(
-        str(CARPETA_REPORTES / "drift_entrenamiento_prueba.html"))
+        str(CARPETA_REPORTES / "drift_entrenamiento_prueba.html"), as_widget=False
+    )
     print(f"Reportes HTML en {CARPETA_REPORTES}")
 
 
