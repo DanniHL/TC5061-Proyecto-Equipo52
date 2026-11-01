@@ -12,7 +12,7 @@ import hashlib
 import re
 import urllib.request
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from loguru import logger
 import pandas as pd
@@ -46,6 +46,19 @@ ENCABEZADOS = {"User-Agent": "equipo52-mibici/1.0"}
 # Codificaciones observadas en el mismo notebook: 97 archivos en UTF-8 y 45 en Latin-1.
 CODIFICACIONES = ["utf-8-sig", "latin-1"]
 
+# Seguridad (hallazgo B310 de bandit): las ligas se leen de una página web, así que solo se abren
+# las que usan https y apuntan al dominio de MiBici. Una liga con file:// u otro sitio se rechaza.
+DOMINIOS_PERMITIDOS = {"mibici.net", "www.mibici.net"}
+SEGUNDOS_ESPERA = 60
+
+
+def validar_liga(url: str) -> str:
+    """Regresa la liga si es https y de MiBici; si no, se detiene con un error."""
+    partes = urlparse(url)
+    if partes.scheme != "https" or partes.hostname not in DOMINIOS_PERMITIDOS:
+        raise ValueError(f"Liga no permitida: {url!r}")
+    return url
+
 
 def obtener_ligas(url_pagina: str) -> dict[str, str]:
     """Busca en la página de datos abiertos las ligas a los archivos CSV.
@@ -53,8 +66,8 @@ def obtener_ligas(url_pagina: str) -> dict[str, str]:
     Las direcciones no siguen un patrón (cada archivo está en una carpeta distinta),
     así que se leen de la página. Regresa {nombre limpio: dirección completa}.
     """
-    peticion = urllib.request.Request(url_pagina, headers=ENCABEZADOS)
-    with urllib.request.urlopen(peticion) as respuesta:
+    peticion = urllib.request.Request(validar_liga(url_pagina), headers=ENCABEZADOS)
+    with urllib.request.urlopen(peticion, timeout=SEGUNDOS_ESPERA) as respuesta:  # nosec B310
         html = respuesta.read().decode("utf-8")
     ligas = {}
     for ruta in re.findall(r'href="([^"]+\.csv)"', html):
@@ -85,8 +98,8 @@ def descargar_faltantes(ligas: dict[str, str], carpeta: Path) -> None:
     for nombre, url in tqdm(faltantes.items(), desc="Descargando"):
         destino = carpeta / nombre
         temporal = destino.with_suffix(".parcial")
-        peticion = urllib.request.Request(url, headers=ENCABEZADOS)
-        with urllib.request.urlopen(peticion) as respuesta:
+        peticion = urllib.request.Request(validar_liga(url), headers=ENCABEZADOS)
+        with urllib.request.urlopen(peticion, timeout=SEGUNDOS_ESPERA) as respuesta:  # nosec B310
             temporal.write_bytes(respuesta.read())
         temporal.rename(destino)
 
