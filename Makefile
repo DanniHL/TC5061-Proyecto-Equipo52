@@ -92,7 +92,8 @@ entorno-calidad: .venv-calidad/bin/python
 .PHONY: seguridad
 seguridad:
 	$(PYTHON_INTERPRETER) -m bandit -r equipo52_module -ll
-	$(PYTHON_INTERPRETER) -m pip_audit -r requirements.txt --no-deps
+	grep -v '^-e' requirements.txt > /tmp/req-audit.txt
+	$(PYTHON_INTERPRETER) -m pip_audit -r /tmp/req-audit.txt --no-deps --disable-pip
 
 
 ## Corre todo lo anterior con un solo comando
