@@ -64,6 +64,42 @@ data: requirements
 	$(PYTHON_INTERPRETER) equipo52_module/dataset.py
 
 
+## Corre todas las pruebas: unitarias, reproducibilidad, seguridad y datos reales
+.PHONY: test
+test:
+	$(PYTHON_INTERPRETER) -m pytest tests
+
+
+## Genera las muestras reales y corre la validación de datos con DeepChecks
+.PHONY: test-datos
+test-datos: .venv-calidad/bin/python
+	$(PYTHON_INTERPRETER) -m pytest tests/datos -v
+
+
+## Crea .venv-calidad: DeepChecks 0.19 no funciona con el NumPy 2 ni con el
+## scikit-learn 1.9 del entorno principal, así que vive en un entorno aparte
+#  (requirements-calidad.txt). Solo se crea si no existe; para reinstalarlo se
+#  borra la carpeta y se corre de nuevo.
+.venv-calidad/bin/python:
+	python3.12 -m venv .venv-calidad
+	.venv-calidad/bin/pip install -r requirements-calidad.txt
+
+.PHONY: entorno-calidad
+entorno-calidad: .venv-calidad/bin/python
+
+
+## Corre bandit sobre el código del módulo y pip-audit sobre requirements.txt
+.PHONY: seguridad
+seguridad:
+	$(PYTHON_INTERPRETER) -m bandit -r equipo52_module -ll
+	$(PYTHON_INTERPRETER) -m pip_audit -r requirements.txt --no-deps
+
+
+## Corre todo lo anterior con un solo comando
+.PHONY: verificar
+verificar: entorno-calidad test seguridad
+
+
 #################################################################################
 # Self Documenting Commands                                                     #
 #################################################################################
