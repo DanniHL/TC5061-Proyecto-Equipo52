@@ -597,16 +597,59 @@ La ejecución y los resultados de estas pruebas deben documentarse una vez que e
 
 ### 11.6 Seguridad
 
-Se consideran verificaciones básicas para reducir riesgos relacionados con el manejo del código y las dependencias:
+Se aplicaron dos herramientas de análisis y prácticas para evitar exponer información sensible. Cada hallazgo se corrigió en un commit propio y se verificó volviendo a ejecutar la herramienta.
 
-- Exclusión de archivos locales y credenciales mediante `.gitignore`.
-- Uso de variables de entorno para configuraciones sensibles.
-- Evitar incluir contraseñas, tokens o credenciales directamente en el código.
-- Revisión de dependencias y posibles vulnerabilidades.
+#### Ejecución
 
-Se contempla el uso de herramientas como Bandit para analizar el código Python y pip-audit para revisar las dependencias instaladas.
+Las herramientas se instalan con `requirements.txt` (`bandit==1.9.4` y `pip-audit==2.10.1`). Para correr ambas:
 
-La ejecución de estas herramientas y sus resultados deben incorporarse a la documentación cuando se completen las validaciones correspondientes.
+```bash
+make seguridad
+```
+
+La regla ejecuta Bandit sobre el código del módulo (solo hallazgos de severidad media o alta) y pip-audit sobre las versiones de `requirements.txt`. pip-audit requiere versiones exactas y no admite la línea `-e .`, por lo que la regla audita una copia del archivo sin esa línea. Los comandos equivalentes son:
+
+```bash
+python -m bandit -r equipo52_module -ll
+grep -v '^-e' requirements.txt > /tmp/req-audit.txt
+python -m pip_audit -r /tmp/req-audit.txt --no-deps --disable-pip
+```
+
+Las pruebas de seguridad del repositorio se ejecutan con:
+
+```bash
+python -m pytest -v tests/seguridad/
+```
+
+#### Resultados
+
+| Herramienta | Antes | Corrección | Después |
+|---|---|---|---|
+| Bandit | 2 hallazgos de severidad media (B310) en `dataset.py`: las ligas de descarga se leen de la página de MiBici y se abrían sin validar su esquema ni su dominio, y sin tiempo límite. 13 hallazgos de severidad baja. | Función `validar_liga()`: solo acepta ligas `https` de `mibici.net` (las 143 ligas del manifiesto lo son) y las descargas tienen un tiempo límite de 60 s. | 0 hallazgos de severidad media o alta. Los 13 de severidad baja (llamadas fijas a `git rev-parse` y `assert` en `train_p1.py`) se documentan como riesgo aceptado. |
+| pip-audit | `mlflow 3.17.0` con la vulnerabilidad CVE-2026-53995. | Actualización a `mlflow==3.17.2`. Además, `pytest` se fijó en `9.2.0`, ya que pip-audit requiere versiones exactas. | Sin vulnerabilidades conocidas. |
+
+![Bandit antes](docs/evidencias/10b_bandit_antes_resumen.png)
+![Bandit después](docs/evidencias/11_bandit_despues_sin_medium.png)
+![pip-audit antes](docs/evidencias/12_pip_audit_antes_mlflow_cve.png)
+![pip-audit después](docs/evidencias/13_pip_audit_despues_sin_vulnerabilidades.png)
+
+#### Datos sensibles y variables de entorno
+
+- `.gitignore` excluye los datos, `mlflow.db`, `mlruns/`, `mlartifacts/`, los entornos virtuales, `.env` y sus variantes (`.env.*`), llaves (`*.pem`, `*.key`) y archivos de credenciales (`credentials*.json`).
+- `.env.example` documenta la variable `MLFLOW_TRACKING_URI` sin valores secretos. Para usarlo: `cp .env.example .env`.
+- La ingesta no lee las columnas con datos personales (`Usuario_Id`, `Genero` y `Año_de_nacimiento`).
+
+![Archivos ignorados por Git](docs/evidencias/09_gitignore_archivos_sensibles.png)
+
+`tests/seguridad/test_seguridad.py` convierte estas revisiones en pruebas automáticas sobre los archivos que versiona Git: ausencia de archivos de credenciales y de patrones de secretos, reglas del `.gitignore`, `.env.example` sin valores, lectura de `MLFLOW_TRACKING_URI` desde el entorno, ausencia de columnas personales y de datos en el repositorio.
+
+Resultado de la ejecución documentada:
+
+```text
+21 passed
+```
+
+![Pruebas de seguridad](docs/evidencias/14_pytest_seguridad.png)
 
 ## 12. Control de versiones y colaboración
 
