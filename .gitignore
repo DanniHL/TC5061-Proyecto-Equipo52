@@ -200,9 +200,12 @@ mlflow.db
 !/models/.gitkeep
 
 
-# Entornos virtuales
+# Entornos virtuales (incluido .venv-calidad, el entorno aparte de DeepChecks)
 .venv/
 .venv-test/
+.venv-calidad/
+# Reportes HTML generados por DeepChecks (se regeneran con make test-datos)
+/reports/calidad/
 venv/
 
 # Archivos de respaldo
@@ -212,3 +215,12 @@ requirements_backup.txt
 
 # Copia local de los CSV de MiBici (los datos no se versionan; se obtienen con dataset.py)
 /project_Data/
+
+# Semana 7 - Pruebas y seguridad
+# Variables de entorno con valores reales (solo se versiona .env.example)
+.env.*
+!.env.example
+# Llaves y credenciales: nunca se versionan
+*.pem
+*.key
+credentials*.json
