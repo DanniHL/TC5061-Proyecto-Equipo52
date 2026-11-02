@@ -28,7 +28,7 @@ ARCHIVOS_PROHIBIDOS = re.compile(r"(^|/)(\.env(\.(?!example$).+)?|id_rsa|credent
 @pytest.fixture(scope="module")
 def versionados() -> list[str]:
     """Archivos que Git sube a GitHub (git ls-files)."""
-    salida = subprocess.run(["git", "ls-files", "-z"], cwd=PROJ_ROOT, capture_output=True, text=True, check=True)
+    salida = subprocess.run(["git", "ls-files", "-z"], cwd=PROJ_ROOT, capture_output=True, text=True, encoding="utf-8", check=True)
     return [ruta for ruta in salida.stdout.split("\0") if ruta]
 
 
