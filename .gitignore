@@ -195,10 +195,7 @@ cython_debug/
 /mlartifacts/
 mlflow.db
 
-# Modelos entrenados y artefactos generados
-/models/*
-!/models/.gitkeep
-
+# Los modelos entrenados se versionan para construir las imágenes Docker/Podman
 
 # Entornos virtuales (incluido .venv-calidad, el entorno aparte de DeepChecks)
 .venv/
