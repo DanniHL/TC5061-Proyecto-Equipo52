@@ -1,0 +1,45 @@
+artifact_path: /Users/Roberto/Proyectos/equipo52_proyecto_mibici/mlruns/1/models/m-3d7150a9b5b6437b9587bb196b1a5391/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.skops
+    predict_fn: predict
+    python_version: 3.12.10
+  sklearn:
+    code: null
+    pickled_model: model.skops
+    serialization_format: skops
+    sklearn_version: 1.9.1
+    skops_trusted_types:
+    - sklearn.ensemble._hist_gradient_boosting.predictor.TreePredictor
+is_signature_from_type_hint: false
+mlflow_version: 3.17.0
+model_id: m-3d7150a9b5b6437b9587bb196b1a5391
+model_size_bytes: 4239511
+model_uuid: m-3d7150a9b5b6437b9587bb196b1a5391
+prompts: null
+run_id: d40ea0ba5c6247a79477c804de672cb2
+saved_input_example_info:
+  artifact_path: input_example.json
+  pandas_orient: split
+  serving_input_path: serving_input_example.json
+  type: dataframe
+signature:
+  inputs: '[{"type": "integer", "name": "hora_del_dia", "required": true}, {"type":
+    "integer", "name": "dia_semana", "required": true}, {"type": "integer", "name":
+    "mes", "required": true}, {"type": "integer", "name": "fin_de_semana", "required":
+    true}, {"type": "long", "name": "capacidad", "required": true}, {"type": "double",
+    "name": "latitud", "required": true}, {"type": "double", "name": "longitud", "required":
+    true}, {"type": "float", "name": "salidas_hora_anterior", "required": true}, {"type":
+    "float", "name": "llegadas_hora_anterior", "required": true}, {"type": "float",
+    "name": "salidas_3_horas_anteriores", "required": true}, {"type": "float", "name":
+    "llegadas_3_horas_anteriores", "required": true}, {"type": "float", "name": "semanas_sin_bicicletas",
+    "required": true}, {"type": "float", "name": "semanas_sin_anclajes", "required":
+    true}]'
+  outputs: '[{"type": "tensor", "tensor-spec": {"dtype": "int64", "shape": [-1]}}]'
+  params: null
+type_hint_from_example: false
+utc_time_created: '2026-10-24 18:56:53.183722'
