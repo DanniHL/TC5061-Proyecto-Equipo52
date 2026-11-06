@@ -197,7 +197,21 @@ mlflow.db
 
 # Modelos entrenados y artefactos generados
 /models/*
-!/models/.gitkeep
+# Conservar estructura de carpetas para los modelos de cada pregunta
+!/models/p1/
+!/models/p2/
+!/models/p3/
+
+# Mantener ignorados los archivos de modelos, excepto .gitkeep
+/models/p1/*
+!/models/p1/.gitkeep
+
+/models/p2/*
+!/models/p2/.gitkeep
+
+/models/p3/*
+!/models/p3/.gitkeep
+#!/models/.gitkeep
 
 
 # Entornos virtuales (incluido .venv-calidad, el entorno aparte de DeepChecks)
