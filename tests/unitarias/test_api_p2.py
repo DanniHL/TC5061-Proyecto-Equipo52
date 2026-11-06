@@ -1,6 +1,7 @@
-"""Pruebas de la API de P2: validación de entradas (esquema) y predicción con el champion empaquetado."""
+"""Pruebas de la API de P2: esquema de entrada, predicción con el champion empaquetado y peticiones HTTP."""
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from api.main import app
@@ -125,3 +126,58 @@ def test_el_endpoint_usa_los_esquemas_de_p2():
     assert entrada.endswith("/EntradaP2")
     assert salida.endswith("/SalidaP2")
     assert "422" in operacion["responses"]
+
+# ------------------------------------------------------------------ peticiones HTTP
+
+@pytest.fixture(scope="module")
+def cliente():
+    """Cliente HTTP de la API; con el bloque with corre el arranque real, que carga el modelo."""
+    with TestClient(app) as cliente_http:
+        yield cliente_http
+
+
+def test_health_responde_ok(cliente):
+    respuesta = cliente.get("/health")
+    assert respuesta.status_code == 200
+    assert respuesta.json() == {"estado": "ok"}
+
+
+def test_predict_responde_200_con_la_prediccion(cliente, entrada_valida):
+    respuesta = cliente.post("/p2/predict", json=entrada_valida)
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    assert set(cuerpo) == {"clase", "etiqueta", "probabilidades"}
+    assert (cuerpo["clase"], cuerpo["etiqueta"]) == (1, "sin_bicicletas")
+    assert sum(cuerpo["probabilidades"].values()) == pytest.approx(1, abs=0.001)
+
+
+def test_predict_responde_200_si_el_historial_viene_en_null(cliente, entrada_valida):
+    entrada_valida["semanas_sin_bicicletas"] = None
+    assert cliente.post("/p2/predict", json=entrada_valida).status_code == 200
+
+
+@pytest.mark.parametrize("cambio, campo_en_error", [({"hora_del_dia": 99}, "hora_del_dia"),
+                                                    ({"mes": 13}, "mes"),
+                                                    ({"latitud": 19.4}, "latitud"),
+                                                    ({"hora_del_dia": "siete"}, "hora_del_dia"),
+                                                    ({"estacion": 5}, "estacion")])
+def test_predict_responde_422_e_indica_el_campo(cliente, entrada_valida, cambio, campo_en_error):
+    respuesta = cliente.post("/p2/predict", json={**entrada_valida, **cambio})
+    assert respuesta.status_code == 422
+    assert campo_en_error in respuesta.json()["detail"][0]["loc"]
+
+
+def test_predict_responde_422_si_el_calendario_es_inconsistente(cliente, entrada_valida):
+    respuesta = cliente.post("/p2/predict", json={**entrada_valida, "dia_semana": 6})
+    assert respuesta.status_code == 422
+    assert "fin_de_semana" in respuesta.json()["detail"][0]["msg"]
+
+
+def test_predict_responde_422_si_falta_un_campo_o_el_cuerpo(cliente, entrada_valida):
+    del entrada_valida["capacidad"]
+    assert cliente.post("/p2/predict", json=entrada_valida).status_code == 422
+    assert cliente.post("/p2/predict").status_code == 422
+
+
+def test_predict_no_acepta_get(cliente):
+    assert cliente.get("/p2/predict").status_code == 405
