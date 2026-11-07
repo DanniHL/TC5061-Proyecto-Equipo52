@@ -64,74 +64,105 @@ Los datos originales y procesados no se incluyen en el repositorio debido a su t
 El repositorio se organiza de la siguiente manera:
 
 ```text
-TC5061-Proyecto-Equipo52/
+## 3. Estructura del proyecto
+
+El repositorio está organizado para separar la ingesta y preparación de datos, el desarrollo de los modelos de Machine Learning, la API de inferencia, las pruebas y los elementos necesarios para su despliegue.
+
+```text
+equipo52_proyecto_mibici/
+│
+├── api/
+│   ├── main.py
+│   ├── routers/
+│   │   ├── p1.py
+│   │   ├── p2.py
+│   │   └── p3.py
+│   ├── schemas/
+│   │   ├── p1.py
+│   │   ├── p2.py
+│   │   └── p3.py
+│   └── services/
+│       ├── p1.py
+│       ├── p2.py
+│       └── p3.py
 │
 ├── data/
-│   ├── raw/
-│   └── processed/
+│   └── ...
 │
 ├── docs/
+│   └── ...
 │
 ├── equipo52_module/
-│   ├── __init__.py
-│   ├── dataset.py
-│   ├── features.py
-│   └── modeling/
-│       ├── train_p1.py
-│       ├── train_p2.py
-│       └── train_p3.py
+│   └── ...
 │
 ├── models/
+│   ├── p1/
+│   │   └── ...
+│   ├── p2/
+│   │   └── ...
+│   └── p3/
+│       └── ...
 │
 ├── notebooks/
+│   └── ...
+│
+├── project_Data/
+│   └── ...
 │
 ├── references/
-│   └── manifiesto_datos.json
+│   └── ...
 │
 ├── reports/
-│   └── figures/
+│   ├── figures/
+│   │   └── ...
+│   └── calidad/
+│       └── ...
 │
 ├── tests/
-│   ├── conftest.py
 │   ├── unitarias/
-│   │   ├── test_dataset.py
-│   │   ├── test_features_p2.py
-│   │   ├── test_train_p2.py
-│   │   ├── test_train_p1.py
-│   │   └── test_features_p3.py
-│   │
+│   │   └── ...
 │   ├── reproducibilidad/
-│   │   └── test_reproducibilidad.py
-│   │
+│   │   └── ...
 │   ├── seguridad/
-│   │   └── test_seguridad.py
-│   │
+│   │   └── ...
 │   └── datos/
-│       └── test_deepchecks.py
+│       └── ...
 │
+├── .env.example
 ├── .gitignore
-├── mkdocs.yml
-├── pyproject.toml
+├── Dockerfile
+├── Makefile
 ├── README.md
+├── pyproject.toml
 └── requirements.txt
 ```
+
 
 ### 3.1 Organización de carpetas
 
 | Carpeta | Propósito |
 |---|---|
-| `data/raw/` | Datos originales obtenidos de la fuente. |
-| `data/processed/` | Datos transformados y preparados para el modelado. |
-| `docs/` | Documentación del proyecto. |
+| `api/` | Implementación de la API REST con FastAPI para consultar los modelos P1, P2 y P3. |
+| `api/routers/` | Endpoints para recibir solicitudes de predicción de cada modelo. |
+| `api/schemas/` | Esquemas Pydantic para validar los datos de entrada y salida de la API. |
+| `api/services/` | Servicios para cargar los modelos y generar predicciones. |
+| `data/` | Datos originales y procesados utilizados durante el desarrollo del proyecto. |
+| `docs/` | Documentación técnica del proyecto. |
 | `equipo52_module/` | Código fuente del proyecto. |
-| `equipo52_module/modeling/` | Scripts de entrenamiento de P1, P2 y P3. |
-| `models/` | Espacio destinado a los modelos generados localmente. |
+| `equipo52_module/modeling/` | Scripts de preparación, entrenamiento y evaluación de los modelos P1, P2 y P3. |
+| `models/` | Modelos entrenados y artefactos necesarios para ejecutar la API; sus archivos se versionan en Git. |
 | `notebooks/` | Análisis exploratorio y experimentación. |
-| `references/` | Manifiesto y referencias de los datos utilizados. |
-| `reports/figures/` | Gráficas y resultados visuales. |
+| `project_Data/` | Copia local de los archivos CSV de MiBici obtenidos mediante el proceso de descarga. |
+| `references/` | Manifiestos y referencias de los datos utilizados. |
+| `reports/figures/` | Gráficas y resultados visuales generados durante el análisis y evaluación de los modelos. |
+| `reports/calidad/` | Reportes de validación y calidad de los datos. |
 | `tests/` | Pruebas automatizadas y validaciones del proyecto. |
+| `tests/unitarias/` | Pruebas unitarias de los componentes de ingesta, preparación y entrenamiento. |
+| `tests/reproducibilidad/` | Pruebas para verificar la reproducibilidad de los resultados. |
+| `tests/seguridad/` | Pruebas relacionadas con la gestión de secretos, credenciales y archivos sensibles. |
+| `tests/datos/` | Pruebas de calidad y validación de datos mediante DeepChecks.
 
-Los datos, modelos y artefactos generados localmente no se incorporan al control de versiones cuando están excluidos mediante `.gitignore`.
+Los datos y artefactos generados localmente no se incorporan al control de versiones cuando están excluidos mediante `.gitignore`.
 
 ## 4. Tecnologías utilizadas
 
@@ -310,6 +341,19 @@ Los resultados registrados para la comparación inicial fueron:
 
 La selección del modelo considera la reducción del error y su comportamiento en los datos de prueba.
 
+Requiere haber corrido la ingesta: `train_p1.py` prepara sus datos desde `data/interim/viajes.parquet` (periodo del proyecto, sin las 14 estaciones excluidas). Desde la raíz del proyecto se ejecuta:
+```bash
+python equipo52_module/modeling/train_p1.py
+```
+
+- `Baseline`: utiliza la demanda observada en el periodo anterior como referencia para el pronóstico.
+- `Regresión lineal`: estima la demanda futura a partir de las variables predictoras disponibles.
+- `Evaluación`: compara los modelos mediante MAE y RMSE. MAE mide el error absoluto promedio, mientras que RMSE penaliza con mayor peso los errores grandes.
+- `Registro en MLflow`: permite comparar las corridas y conservar los parámetros, las métricas, la información de los datos y los artefactos generados por cada modelo.
+
+Las corridas deben mantener el mismo criterio de evaluación para que la comparación sea consistente. Los resultados permitirán determinar si los modelos de regresión aportan una mejora frente a la persistencia y si su precisión resulta útil para la planeación operativa de MiBici.
+
+
 ### 7.5 Ejecutar el entrenamiento
 
 ```bash
@@ -370,6 +414,61 @@ Los experimentos de P2 se registran en el experimento compartido `mibici-equipo5
 
 El seguimiento permite comparar las ejecuciones, sus parámetros y métricas, así como conservar los artefactos generados durante el entrenamiento.
 
+Requiere haber corrido la ingesta y tener encendido el servidor de MLflow (ver «Ver los experimentos en MLflow»). En la terminal donde se lanzan las corridas:
+
+```bash
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+```
+
+Todas las corridas de la entrega se lanzan con `mlflow run`. `--env-manager local` usa el entorno virtual activo (Python 3.12 con las versiones de `requirements.txt`) y `--experiment-name` hace que la corrida del proyecto nazca en `mibici-equipo52`, el mismo experimento de la entrega anterior.
+
+**Partición en el tiempo.** Entrenamiento desde 2014-12-01 (o desde 2023-05-09 en `postcovid`) hasta septiembre de 2025, validación de octubre de 2025 a marzo de 2026 y prueba de abril a septiembre de 2026. Se elige con validación (`val_*`) y se confirma con prueba (`test_*`). El modelo final se reentrena con entrenamiento + validación: es el mismo periodo de la entrega anterior, así que las métricas de prueba se comparan directo con el baseline.
+
+**1. Baseline** (repite lo que pasó en las últimas 4 semanas a la misma hora y día):
+
+```bash
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p2 -P modelo=base -P periodo=completo
+```
+
+**2. Búsqueda de hiperparámetros con nested runs** (HistGradientBoosting; una corrida padre y 8 hijas: `peso_fallas` 2, 3, 5 y 8 × `learning_rate` 0.05 y 0.1; cada hija se mide solo en validación):
+
+```bash
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p2 -P modelo=busqueda -P periodo=completo
+```
+
+**3. Candidatas** con la mejor combinación de la búsqueda (`peso_fallas = 3`, `learning_rate = 0.1`, F1 de fallas en validación 0.483 contra 0.442 del baseline):
+
+```bash
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p2 -P modelo=hgb -P periodo=completo -P learning_rate=0.1 -P peso_fallas=3
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p2 -P modelo=logistica -P periodo=completo -P peso_fallas=3
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p2 -P modelo=hgb -P periodo=postcovid -P learning_rate=0.1 -P peso_fallas=3
+```
+
+- `hgb`: HistGradientBoosting con calendario, capacidad, ubicación, movimientos de las horas anteriores y fallas de las últimas 4 semanas.
+- `logistica`: regresión logística (imputación por mediana, estandarización); más simple y con coeficientes interpretables.
+- `peso_fallas`: cuánto pesa cada hora de falla frente a una normal al entrenar. Con 1 el modelo da pocas alertas y se le escapan muchas fallas; con `balanceado=true` (18 a 19 veces) da demasiadas alertas falsas.
+
+**4. Selección.** El notebook `notebooks/2.3-rr-p2-seleccion-modelo.ipynb` compara las candidatas contra el baseline (mejora, F1 de fallas, estabilidad y costo) y guarda la decisión en `reports/p2_seleccion_modelo.json`.
+
+**5. Registro y paso a producción.** Registra el modelo elegido como `mibici-equipo52-p2-riesgo` con su linaje (corrida, commit, versión de datos), pone los alias `champion` (producción) y `challenger` (siguiente mejor) y prueba la carga:
+
+```bash
+python -m equipo52_module.modeling.registrar_p2
+```
+
+El modelo en producción se carga siempre por su alias, así que cambiar de versión no requiere cambiar el código que lo usa:
+
+```python
+import mlflow
+modelo = mlflow.pyfunc.load_model("models:/mibici-equipo52-p2-riesgo@champion")
+```
+
+Se usan aliases y no etapas porque MLflow declaró obsoletas las etapas (`Staging`, `Production`) desde la versión 2.9.
+
+**Qué registra cada corrida en `mibici-equipo52`:** fechas, versión y huella de datos, semilla e hiperparámetros; métricas `val_*`, `test_*` y `segundos_entrenamiento`; etiquetas `equipo`, `pregunta`, `commit`, `question`, `model_family` y `stage_of_work` (`baseline`, `search` o `candidate`); conjuntos de entrenamiento y prueba con `mlflow.log_input`; artefactos en `plots/` (matriz de confusión, curva precisión-recall), `data/` (manifiesto de datos, tablas) y `config/` (configuración de la corrida), y el modelo con firma y ejemplo de entrada.
+
+**Pruebas rápidas sin MLflow Project** (solo para depurar; no cuentan para la entrega): `python -m equipo52_module.modeling.train_p2 --modelo hgb --peso-fallas 3`. Los notebooks `2.1` y `2.2` explican la partición y cómo leer las corridas desde Python.
+
 ### 8.5 Registro del modelo P2 en MLflow
 
 El modelo de P2 se administra mediante el registro de modelos de MLflow, utilizando el nombre:
@@ -417,6 +516,61 @@ Se consideran los siguientes criterios:
 Los experimentos de P3 permiten comparar diferentes configuraciones de agrupación y evaluar la formación de grupos de estaciones con patrones similares.
 
 Los resultados se registran en el experimento compartido `mibici-equipo52`, conservando los parámetros, métricas y artefactos correspondientes a cada ejecución.
+Requiere haber corrido la ingesta (`mlflow run . -e ingest --env-manager local --experiment-name mibici-equipo52`) y tener encendido el servidor de MLflow (ver «Ver los experimentos en MLflow»). En la terminal donde se lanzan las corridas:
+
+```bash
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+```
+
+Todas las corridas de P3 se lanzan con `mlflow run` en el experimento `mibici-equipo52`:
+
+**Validación y evaluación en toda la red.** Se mide la cohesión y separación en las 371 estaciones consolidadas ($> 6$ meses activas, `val_silhouette`) y en las 469 estaciones activas de toda la red incluyendo las 98 abiertas en mayo–agosto de 2026 (`hist_silhouette`, `hist_davies_bouldin`, `hist_calinski_harabasz`), junto con la estabilidad temporal entre eras (`estabilidad_eras_ari`, corte `2020-09-01` sobre las 274 estaciones comunes) y por remuestreo (`estabilidad_bootstrap_ari`, 30 remuestreos al 80 %).
+
+**1. Baseline** (K-Means con $k = 5$ solo sobre latitud y longitud, evaluado en el espacio de las 42 características de uso):
+
+```bash
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p3 -P modelo=geo
+```
+
+**2. Búsqueda de hiperparámetros con nested runs** (K-Means; una corrida padre `p3-busqueda-kmeans` y 10 hijas: `k` de 2 a 6 × `solo_consolidadas` `False` y `True`):
+
+```bash
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p3 -P modelo=busqueda
+```
+
+**3. Candidatas** (óptimo operativo de 4 perfiles `k = 4`, óptimo global macro `k = 2`, variante de ajuste en estaciones consolidadas, agrupamiento jerárquico `ward` y densidad `hdbscan`):
+
+```bash
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p3 -P modelo=kmeans -P k=4
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p3 -P modelo=kmeans -P k=2
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p3 -P modelo=kmeans -P k=4 -P solo_consolidadas=true
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p3 -P modelo=ward
+mlflow run . -e train --env-manager local --experiment-name mibici-equipo52 -P pregunta=p3 -P modelo=hdbscan -P min_cluster_size=15
+```
+
+- `kmeans` ($k = 4$, `p3-kmeans-k4`): candidato elegido (`champion`); cuadruplica la resolución del corte macro y multiplica por 5.6 la silueta del baseline (`hist_silhouette = 0.105` vs. `0.019`, `val_silhouette = 0.131` vs. `0.039`, `Davies-Bouldin = 2.075` en validación y `2.309` en la red completa), separando los 4 perfiles operativos de planeación (núcleo central receptor, polos de empleo con vaciado vespertino 17–19 h, zonas residenciales emisoras matutinas 7–9 h y expansión periférica recreativa dominical).
+- `kmeans` ($k = 2$, `p3-kmeans-k2`): `challenger`; alcanza el máximo matemático global de silueta (`hist_silhouette = 0.151`, `val_silhouette = 0.145`, `estabilidad_bootstrap_ari = 0.952`, `estabilidad_eras_ari = 0.618`) para segmentación macro de la red.
+- `solo_consolidadas=true` (`p3-kmeans-k4-consolidadas`): ajusta el escalador y los centroides con las 371 estaciones consolidadas ($> 6$ meses, `val_silhouette = 0.127`) y proyecta las 98 estaciones abiertas en 2026.
+- `ward` (`p3-ward-k2`): agrupamiento jerárquico con enlace Ward (`hist_silhouette = 0.129`, `estabilidad_eras_ari = 0.648`, dendrograma y concordancia con K-Means `ARI = 0.565`).
+- `hdbscan` (`p3-hdbscan-mcs15`): diagnóstico de densidad que confirma el continuo urbano de la red e identifica estaciones atípicas.
+
+**4. Selección.** El notebook `notebooks/3.2-js-p3-mlflow-seleccion-modelo.ipynb` comprueba que las corridas oficiales de `mlflow run` coincidan con la referencia del notebook `3.1`, revisa los artefactos y la búsqueda con nested runs, compara las candidatas con los cuatro criterios de la actividad y respalda la decisión en `reports/p3_seleccion_modelo.json`.
+
+**5. Registro y paso a producción.** Registra el modelo elegido y el challenger como versiones de `mibici-equipo52-p3-grupos` con su linaje (experimento, corrida de origen, commit, versión y huella de datos), asigna los alias `champion` (producción) y `challenger` (siguiente mejor) y verifica la carga desde producción:
+
+```bash
+python -m equipo52_module.modeling.registrar_p3
+```
+
+El modelo en producción se carga siempre por su nombre y alias, lo que desacopla el código de inferencia de la versión activa y permite revertir o actualizar el modelo reasignando el alias (esquema vigente de MLflow desde que las etapas clásicas fueron declaradas obsoletas en MLflow 2.9):
+
+```python
+import mlflow
+modelo = mlflow.pyfunc.load_model("models:/mibici-equipo52-p3-grupos@champion")
+```
+
+**Qué registra cada corrida de P3 en `mibici-equipo52`:** fechas, versión y huella de datos, semilla e hiperparámetros; métricas `val_*`, `hist_*`, `estabilidad_eras_ari`, `estabilidad_bootstrap_ari` y `segundos_entrenamiento`; etiquetas `equipo`, `pregunta`, `commit`, `question`, `model_family` y `stage_of_work` (`baseline`, `search` o `candidate`); conjuntos de estaciones con `mlflow.log_input`; artefactos en `plots/` (mapa de grupos, perfiles horarios, silueta por $k$, dendrograma), `data/` (manifiesto de datos, matriz estación × característica y descripción de grupos con desglose por municipio `GDL`/`ZPN`/`TLQ`) y `config/` (configuración de la corrida y del proyecto), y el modelo con firma y ejemplo de entrada.
+
 
 ### 9.5 Registro del modelo P3 en MLflow
 
@@ -495,9 +649,45 @@ Los modelos registrados para el proyecto son:
 | P2 | `mibici-equipo52-p2-riesgo` |
 | P3 | `mibici-equipo52-p3-grupos` |
 
-Para P1 se registró la versión 1 con el alias `champion`.
+Para la pregunta P1, se seleccionó una regresión lineal con variables cíclicas del calendario y preprocesamiento mediante StandardScaler, con el objetivo de predecir la demanda diaria de viajes de MiBici.
 
-En P2 y P3, la versión seleccionada, el alias y los resultados específicos pueden consultarse en el Model Registry de MLflow.
+El modelo se registró en MLflow Model Registry con el nombre
+
+```bash
+mibici-equipo52-p1-demanda.
+```
+
+La versión 1 se identificó con el alias champion, que permite recuperar la versión seleccionada sin depender de un número de versión fijo en el código.
+
+La selección se basó en la evaluación con datos de prueba. El modelo obtuvo un MAE de 6.6464 y un RMSE de 11.3658, mejorando los resultados del modelo de persistencia utilizado como línea base. La corrida de origen fue Pipeline_Regresion_Ciclica_P1, con identificador db35a9caee2b4d25bc6ea3faee674842.
+
+Para cargar el modelo registrado mediante su alias:
+```bash
+import mlflow.sklearn
+
+modelo = mlflow.sklearn.load_model(
+    "models:/mibici-equipo52-p1-demanda@champion"
+)
+```
+
+Para la pregunta P2
+El modelo se registró en MLflow Model Registry con el nombre
+
+```bash
+mibici-equipo52-p2-riesgo.
+```
+
+La versión 1 se identificó con el alias champion, que permite recuperar la versión seleccionada sin depender de un número de versión fijo en el código.
+L
+a versión seleccionada se identifica mediante el alias champion, de modo que pueda cargarse sin depender de un número de versión específico:
+```bash
+import mlflow.sklearn
+
+modelo = mlflow.sklearn.load_model(
+    "models:/mibici-equipo52-p2-riesgo@champion"
+)
+```
+
 
 ## 11. Pruebas automatizadas y calidad del código
 
@@ -743,20 +933,147 @@ Se recomienda utilizar mensajes descriptivos siguiendo una estructura similar a 
 - No incorporar al repositorio los archivos de datos locales, credenciales ni artefactos que estén excluidos mediante `.gitignore`.
 - Ejecutar las pruebas correspondientes antes de integrar cambios mediante un Pull Request.
 
-## 14. Resultados y entregables
+## 13. API REST para los modelos
 
-El proyecto integra los siguientes componentes:
+El proyecto incorpora una API REST desarrollada con FastAPI para facilitar el consumo de los modelos de aprendizaje automático mediante solicitudes HTTP. La API permite enviar información de entrada en formato JSON y recibir los resultados de las predicciones.
 
-1. Proceso de ingesta y preparación de los datos históricos de MiBici.
-2. Desarrollo de modelos para las preguntas P1, P2 y P3.
-3. Seguimiento de experimentos mediante MLflow.
-4. Comparación y evaluación de modelos.
-5. Registro de modelos seleccionados mediante MLflow Model Registry.
-6. Organización de pruebas automatizadas mediante Pytest.
-7. Documentación del proceso de desarrollo y colaboración mediante GitHub.
+### 13.1 Iniciar la API localmente
 
-El objetivo de esta estructura es mantener un flujo de trabajo reproducible, organizado y trazable, en el que sea posible identificar qué datos, código y parámetros se utilizaron para generar cada resultado.
+Desde la raíz del repositorio, con el entorno virtual activado, ejecutar:
 
----
+```bash
+uvicorn api.main:app --host 127.0.0.1 --port 8000
+```
 
-**Equipo 52 · TC5061 · Maestría en Inteligencia Artificial**
+La API estará disponible en:
+
+```text
+http://127.0.0.1:8000
+```
+
+La documentación interactiva de los endpoints se puede consultar en:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+### 13.2 Verificar el estado del servicio
+
+El endpoint `/health` permite comprobar que la API se encuentra disponible.
+
+**Petición:**
+
+```http
+GET http://localhost:8000/health
+```
+
+**Respuesta:**
+
+```json
+{
+  "estado": "ok"
+}
+```
+
+### 13.3 Pregunta P1: pronóstico de demanda
+
+El endpoint `/p1/predict` permite generar un pronóstico de demanda diaria para una estación durante los siguientes siete días.
+
+**Método:** POST
+
+**Ruta:**
+
+```text
+http://localhost:8000/p1/predict
+```
+
+**Datos de entrada:**
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `estacion_id` | Entero | Identificador de la estación MiBici. |
+| `fecha_ultimo_dato` | Fecha | Fecha del último día disponible en el historial, formato AAAA-MM-DD. |
+| `viajes_ultimos_7_dias` | Lista de números | Siete valores diarios consecutivos, ordenados del más antiguo al más reciente. |
+
+La lista debe contener exactamente siete valores no negativos.
+
+**Ejemplo de petición:**
+
+```bash
+curl -X POST http://localhost:8000/p1/predict \
+-H "Content-Type: application/json" \
+-d '{"estacion_id":123,"fecha_ultimo_dato":"2026-11-05","viajes_ultimos_7_dias":[18,22,20,25,19,24,27]}'
+```
+
+**Ejemplo de respuesta:**
+
+```json
+{
+  "estacion_id": 123,
+  "pronosticos": [
+    {"fecha": "2026-11-06", "viajes_predichos": 22.7019},
+    {"fecha": "2026-11-07", "viajes_predichos": 16.7012},
+    {"fecha": "2026-11-08", "viajes_predichos": 15.3272},
+    {"fecha": "2026-11-09", "viajes_predichos": 25.6301},
+    {"fecha": "2026-11-10", "viajes_predichos": 24.3929},
+    {"fecha": "2026-11-11", "viajes_predichos": 25.3701},
+    {"fecha": "2026-11-12", "viajes_predichos": 26.2662}
+  ]
+}
+```
+
+El pronóstico se genera de manera recursiva: cada predicción se incorpora al historial para calcular el siguiente día.
+
+### 13.4 Pregunta P2: identificación de riesgo operativo
+
+El endpoint `/p2/predict` permite clasificar las condiciones de una estación y estimar el riesgo relacionado con la disponibilidad de bicicletas y anclajes.
+
+**Método:** POST
+
+**Ruta:**
+
+```text
+http://localhost:8000/p2/predict
+```
+
+**Ejemplo de petición:**
+
+```bash
+curl -s -X POST http://localhost:8000/p2/predict \
+-H "Content-Type: application/json" \
+-d '{"hora_del_dia":7,"dia_semana":2,"mes":10,"fin_de_semana":0,"capacidad":15,"latitud":20.666378,"longitud":-103.34882,"salidas_hora_anterior":10,"llegadas_hora_anterior":0,"salidas_3_horas_anteriores":25,"llegadas_3_horas_anteriores":1,"semanas_sin_bicicletas":4,"semanas_sin_anclajes":0}'
+```
+
+**Ejemplo de respuesta:**
+
+```json
+{
+  "clase": 1,
+  "etiqueta": "sin_bicicletas",
+  "probabilidades": {
+    "normal": 0.1888,
+    "sin_bicicletas": 0.8014,
+    "sin_anclajes": 0.0098
+  }
+}
+```
+
+La respuesta incluye la clase predicha, su etiqueta correspondiente y las probabilidades estimadas para cada categoría.
+
+### 13.5 Pregunta P3: Grupos de estaciones
+
+### 13.6 Recuperación y despliegue de modelos
+
+Los modelos seleccionados se encuentran registrados en MLflow Model Registry, donde se conserva su versión y la información de la corrida de origen.
+
+Para el despliegue actual de la API, los modelos empaquetados se cargan desde las carpetas locales del repositorio:
+
+- `models/p1/`
+- `models/p2/`
+- `models/p3/`
+
+La carga se realiza durante el inicio de FastAPI, evitando tener que cargar el modelo en cada solicitud.
+
+MLflow Model Registry permite identificar y administrar las versiones de los modelos mediante sus nombres y alias, como `champion`. Esto facilita actualizar la versión seleccionada sin depender de un número de versión fijo. La recuperación directa desde el registro requiere configurar el acceso al servidor de MLflow y utilizar la URI correspondiente.
+
+La estrategia de despliegue mediante contenedor permite mantener un entorno de ejecución consistente y facilitar la distribución de la API. Las instrucciones específicas para construir y ejecutar el contenedor se documentarán una vez validada su implementación.
