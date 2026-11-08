@@ -1,0 +1,66 @@
+artifact_path: mlflow-artifacts:/1/models/m-90d733be7b1a445f8c3a4bd2cc1930c8/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.skops
+    predict_fn: predict
+    python_version: 3.12.13
+  sklearn:
+    code: null
+    pickled_model: model.skops
+    serialization_format: skops
+    sklearn_version: 1.9.1
+    skops_trusted_types:
+    - sklearn.cluster._kmeans.KMeans
+    - sklearn.neighbors._nearest_centroid.NearestCentroid
+    - numpy.dtype
+is_signature_from_type_hint: false
+mlflow_version: 3.17.0
+model_id: m-90d733be7b1a445f8c3a4bd2cc1930c8
+model_size_bytes: 34114
+model_uuid: m-90d733be7b1a445f8c3a4bd2cc1930c8
+prompts: null
+run_id: f1721278a8f44272ac05bae27b51fe1b
+saved_input_example_info:
+  artifact_path: input_example.json
+  pandas_orient: split
+  serving_input_path: serving_input_example.json
+  type: dataframe
+signature:
+  inputs: '[{"type": "double", "name": "salidas_por_mes", "required": true}, {"type":
+    "double", "name": "llegadas_por_mes", "required": true}, {"type": "double", "name":
+    "viajes_por_anclaje_mes", "required": true}, {"type": "double", "name": "h00",
+    "required": true}, {"type": "double", "name": "h01", "required": true}, {"type":
+    "double", "name": "h02", "required": true}, {"type": "double", "name": "h03",
+    "required": true}, {"type": "double", "name": "h04", "required": true}, {"type":
+    "double", "name": "h05", "required": true}, {"type": "double", "name": "h06",
+    "required": true}, {"type": "double", "name": "h07", "required": true}, {"type":
+    "double", "name": "h08", "required": true}, {"type": "double", "name": "h09",
+    "required": true}, {"type": "double", "name": "h10", "required": true}, {"type":
+    "double", "name": "h11", "required": true}, {"type": "double", "name": "h12",
+    "required": true}, {"type": "double", "name": "h13", "required": true}, {"type":
+    "double", "name": "h14", "required": true}, {"type": "double", "name": "h15",
+    "required": true}, {"type": "double", "name": "h16", "required": true}, {"type":
+    "double", "name": "h17", "required": true}, {"type": "double", "name": "h18",
+    "required": true}, {"type": "double", "name": "h19", "required": true}, {"type":
+    "double", "name": "h20", "required": true}, {"type": "double", "name": "h21",
+    "required": true}, {"type": "double", "name": "h22", "required": true}, {"type":
+    "double", "name": "h23", "required": true}, {"type": "double", "name": "d0", "required":
+    true}, {"type": "double", "name": "d1", "required": true}, {"type": "double",
+    "name": "d2", "required": true}, {"type": "double", "name": "d3", "required":
+    true}, {"type": "double", "name": "d4", "required": true}, {"type": "double",
+    "name": "d5", "required": true}, {"type": "double", "name": "d6", "required":
+    true}, {"type": "double", "name": "flujo_neto_por_mes", "required": true}, {"type":
+    "double", "name": "balance", "required": true}, {"type": "double", "name": "num_destinos",
+    "required": true}, {"type": "double", "name": "prop_viajes_redondos", "required":
+    true}, {"type": "double", "name": "duracion_mediana_min", "required": true}, {"type":
+    "double", "name": "meses_activa", "required": true}, {"type": "double", "name":
+    "share_viajes_ultimos_12m", "required": true}, {"type": "double", "name": "crecimiento_vs_esperado",
+    "required": true}]'
+  outputs: '[{"type": "tensor", "tensor-spec": {"dtype": "int32", "shape": [-1]}}]'
+  params: null
+type_hint_from_example: false
+utc_time_created: '2026-10-26 01:43:22.221483'

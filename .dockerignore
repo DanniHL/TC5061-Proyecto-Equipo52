@@ -1,0 +1,27 @@
+# Lo que la imagen no necesita: solo api/, models/ y requirements-api.txt van dentro.
+.git
+.venv
+.venv-calidad
+.pytest_cache
+.ruff_cache
+.DS_Store
+.env
+__pycache__
+*.pyc
+
+# Datos, experimentos y artefactos locales (los modelos ya vienen empaquetados en models/)
+data
+mlartifacts
+mlruns
+mlflow.db
+notebooks
+equipo52_module
+tests
+docs
+reports
+references
+
+# Documentación y archivos temporales
+*.docx
+*.pdf
+~$*
