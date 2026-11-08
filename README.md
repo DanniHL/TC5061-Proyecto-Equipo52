@@ -126,12 +126,14 @@ equipo52_proyecto_mibici/
 │   └── datos/
 │       └── ...
 │
+├── .dockerignore
 ├── .env.example
 ├── .gitignore
 ├── Dockerfile
 ├── Makefile
 ├── README.md
 ├── pyproject.toml
+├── requirements-api.txt
 └── requirements.txt
 ```
 
@@ -1060,6 +1062,56 @@ La respuesta incluye la clase predicha, su etiqueta correspondiente y las probab
 
 ### 13.5 Pregunta P3: Grupos de estaciones
 
+El endpoint `/p3/predict` asigna una estación a su grupo operativo a partir de su perfil de uso. El modelo K-Means champion (k = 4) la clasifica en uno de los cuatro perfiles de la red: núcleo central receptor, polos de empleo con vaciado vespertino, zonas residenciales emisoras matutinas o expansión periférica recreativa.
+
+**Método:** POST
+
+**Ruta:**
+
+```text
+http://localhost:8000/p3/predict
+```
+
+**Datos de entrada:**
+
+Las 42 características del perfil de uso de la estación, en su escala original (las mismas que calcula `construir_matriz_p3` en `equipo52_module/features.py`):
+
+| Grupo de variables | Campos | Validación |
+|---|---|---|
+| Actividad | `salidas_por_mes`, `llegadas_por_mes`, `viajes_por_anclaje_mes` | Mayores o iguales a 0 |
+| Firma horaria | `h00` … `h23` | Proporciones entre 0 y 1; deben sumar 1 (o 0 si la estación no registra salidas) |
+| Firma semanal | `d0` … `d6` | Proporciones entre 0 y 1; deben sumar 1 (o 0 si no registra salidas) |
+| Rol en la red | `flujo_neto_por_mes`, `balance`, `num_destinos` | `balance` entre -1 y 1; `num_destinos` mayor o igual a 0 |
+| Tipo de viaje | `prop_viajes_redondos`, `duracion_mediana_min` | `prop_viajes_redondos` entre 0 y 1; `duracion_mediana_min` mayor o igual a 0 |
+| Evolución | `meses_activa`, `share_viajes_ultimos_12m`, `crecimiento_vs_esperado` | `meses_activa` mayor que 0; `share_viajes_ultimos_12m` entre 0 y 1; `crecimiento_vs_esperado` entre -1 y 1 |
+
+El modelo registrado espera las variables estandarizadas, por lo que el servicio aplica la media y desviación con las que se entrenó (guardadas en `models/p3/escalador.json`) antes de predecir.
+
+**Ejemplo de petición** (perfil de la estación 2, López Cotilla / Penitenciaría):
+
+```bash
+curl -s -X POST http://localhost:8000/p3/predict \
+-H "Content-Type: application/json" \
+-d '{"salidas_por_mes":1316.58,"llegadas_por_mes":1397.74,"viajes_por_anclaje_mes":180.95,"h00":0.0029,"h01":0.0,"h02":0.0,"h03":0.0,"h04":0.0,"h05":0.0044,"h06":0.0279,"h07":0.0663,"h08":0.1219,"h09":0.0734,"h10":0.0499,"h11":0.045,"h12":0.0442,"h13":0.0609,"h14":0.0635,"h15":0.0663,"h16":0.0636,"h17":0.0555,"h18":0.0824,"h19":0.0696,"h20":0.0501,"h21":0.032,"h22":0.0121,"h23":0.0081,"d0":0.1587,"d1":0.1695,"d2":0.1713,"d3":0.1675,"d4":0.1666,"d5":0.104,"d6":0.0624,"flujo_neto_por_mes":81.15,"balance":0.0299,"num_destinos":338,"prop_viajes_redondos":0.0309,"duracion_mediana_min":11.07,"meses_activa":142,"share_viajes_ultimos_12m":0.0951,"crecimiento_vs_esperado":0.092}'
+```
+
+**Ejemplo de respuesta:**
+
+```json
+{
+  "grupo": 0,
+  "etiqueta": "nucleo_receptor",
+  "distancias": {
+    "nucleo_receptor": 3.3732,
+    "empleo_vespertino": 5.2953,
+    "residencial_matutino": 4.9807,
+    "periferico_recreativo": 8.6141
+  }
+}
+```
+
+La respuesta incluye el grupo asignado (0 a 3), su etiqueta y la distancia de la estación al centroide de cada grupo; la menor distancia corresponde al grupo elegido.
+
 ### 13.6 Recuperación y despliegue de modelos
 
 Los modelos seleccionados se encuentran registrados en MLflow Model Registry, donde se conserva su versión y la información de la corrida de origen.
@@ -1074,4 +1126,44 @@ La carga se realiza durante el inicio de FastAPI, evitando tener que cargar el m
 
 MLflow Model Registry permite identificar y administrar las versiones de los modelos mediante sus nombres y alias, como `champion`. Esto facilita actualizar la versión seleccionada sin depender de un número de versión fijo. La recuperación directa desde el registro requiere configurar el acceso al servidor de MLflow y utilizar la URI correspondiente.
 
-La estrategia de despliegue mediante contenedor permite mantener un entorno de ejecución consistente y facilitar la distribución de la API. Las instrucciones específicas para construir y ejecutar el contenedor se documentarán una vez validada su implementación.
+Cada carpeta de `models/` se generó descargando del registry la versión con alias `champion`, con el servidor de MLflow encendido:
+
+```bash
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+mlflow artifacts download --artifact-uri "models:/mibici-equipo52-p1-demanda@champion" --dst-path models/p1
+mlflow artifacts download --artifact-uri "models:/mibici-equipo52-p2-riesgo@champion" --dst-path models/p2
+mlflow artifacts download --artifact-uri "models:/mibici-equipo52-p3-grupos@champion" --dst-path models/p3
+```
+
+Se eligió empaquetar los modelos en la imagen en lugar de consultar el registry en tiempo de ejecución, porque así el contenedor no depende de un servidor de MLflow encendido ni de las rutas locales donde se entrenó cada modelo. Como contrapartida, para cambiar la versión que se sirve hay que exportar el nuevo champion y reconstruir la imagen.
+
+### 13.7 Despliegue en contenedor con Docker
+
+La API completa (los tres modelos y la aplicación FastAPI) se empaqueta en una sola imagen OCI con el `Dockerfile` de la raíz del repositorio. Las dependencias se fijan en `requirements-api.txt` con las mismas versiones que MLflow guardó junto a cada modelo. La imagen usa `python:3.12-slim`, corre el servicio con un usuario sin privilegios y expone el puerto 8000.
+
+**Construir la imagen** (desde la raíz del repositorio):
+
+```bash
+docker build -t mibici-equipo52-api .
+```
+
+**Levantar el contenedor:**
+
+```bash
+docker run -d --name mibici-api -p 8000:8000 mibici-equipo52-api
+```
+
+**Verificar que está en ejecución:**
+
+```bash
+docker ps
+curl http://localhost:8000/health
+```
+
+La API queda disponible en `http://localhost:8000` y su documentación interactiva en `http://localhost:8000/docs`, con los mismos endpoints y ejemplos de las secciones 13.3 a 13.5. Para detener y eliminar el contenedor:
+
+```bash
+docker stop mibici-api && docker rm mibici-api
+```
+
+Los mismos comandos funcionan con Podman (`podman build`, `podman run`), porque el `Dockerfile` sigue el estándar OCI.
