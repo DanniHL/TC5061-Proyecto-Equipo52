@@ -923,7 +923,7 @@ Se recomienda utilizar mensajes descriptivos siguiendo una estructura similar a 
 | `refactor:` | Reorganización del código sin modificar su funcionalidad. |
 | `chore:` | Cambios de mantenimiento y configuración. |
 
-## 13. Consideraciones para la ejecución del proyecto
+## 12.4 Consideraciones para la ejecución del proyecto
 
 - Ejecutar los comandos desde la raíz del repositorio.
 - Activar el entorno virtual antes de instalar dependencias o ejecutar los scripts.
