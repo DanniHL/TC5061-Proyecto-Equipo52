@@ -64,8 +64,6 @@ Los datos originales y procesados no se incluyen en el repositorio debido a su t
 El repositorio se organiza de la siguiente manera:
 
 ```text
-## 3. Estructura del proyecto
-
 El repositorio está organizado para separar la ingesta y preparación de datos, el desarrollo de los modelos de Machine Learning, la API de inferencia, las pruebas y los elementos necesarios para su despliegue.
 
 ```text
@@ -923,7 +921,7 @@ Se recomienda utilizar mensajes descriptivos siguiendo una estructura similar a 
 | `refactor:` | Reorganización del código sin modificar su funcionalidad. |
 | `chore:` | Cambios de mantenimiento y configuración. |
 
-## 13. Consideraciones para la ejecución del proyecto
+### 12.4. Consideraciones para la ejecución del proyecto
 
 - Ejecutar los comandos desde la raíz del repositorio.
 - Activar el entorno virtual antes de instalar dependencias o ejecutar los scripts.
