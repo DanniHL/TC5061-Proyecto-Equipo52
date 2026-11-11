@@ -57,3 +57,11 @@ def test_muestreo_es_reproducible():
     muestra = muestrear(datos, max_filas=100)
     assert len(muestra) == 100
     assert muestra.equals(muestrear(datos, max_filas=100))
+
+def test_acepta_categoricas_con_enteros_de_numpy(tmp_path):
+    datos = crear_datos(media_x=0, prob_a=0.5, semilla=42)
+    datos["hora"] = (np.arange(len(datos)) % 24).astype("int8")
+
+    resumen = generar_reporte_drift(datos, datos, ["x"], ["hora"], "prueba", carpeta=tmp_path)
+
+    assert "hora" in set(resumen["por_columna"]["columna"])    
