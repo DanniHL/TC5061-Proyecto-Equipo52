@@ -221,3 +221,6 @@ requirements_backup.txt
 *.pem
 *.key
 credentials*.json
+
+# Tablas de resultados de Evidently: los resultados se versionan en el HTML y el JSON
+reports/monitoreo/*.csv
