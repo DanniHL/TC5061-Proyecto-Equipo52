@@ -80,11 +80,16 @@ def generar_reporte_drift(
         numerical_columns=columnas_numericas,
         categorical_columns=columnas_categoricas,
     )
+      # Evidently no acepta enteros de numpy (int8, int64) como etiquetas de una categórica:
+    # se convierten a texto, que para una categoría es lo mismo.
+    tipos = {columna: str for columna in columnas_categoricas}
     ref = Dataset.from_pandas(
-        muestrear(referencia[columnas], max_filas), data_definition=definicion
+        muestrear(referencia[columnas], max_filas).astype(tipos), data_definition=definicion
     )
-    act = Dataset.from_pandas(muestrear(actual[columnas], max_filas), data_definition=definicion)
-
+    act = Dataset.from_pandas(
+        muestrear(actual[columnas], max_filas).astype(tipos), data_definition=definicion
+    )
+    
     reporte = Report([DataDriftPreset(), DataSummaryPreset()])
     resultado = reporte.run(act, ref)  # Evidently recibe primero el actual y luego la referencia
 
