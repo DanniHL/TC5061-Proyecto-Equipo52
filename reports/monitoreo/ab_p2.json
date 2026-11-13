@@ -1,0 +1,53 @@
+{
+  "modelo": "mibici-equipo52-p2-riesgo",
+  "periodo_evaluacion": "2026-10",
+  "version_a": "1",
+  "version_b": "3",
+  "metrica": "f1_fallas",
+  "resultado": {
+    "metrica_a": 0.47683751370568517,
+    "metrica_b": 0.47866493922950093,
+    "diferencia": 0.0018274255238157622,
+    "ic_95": [
+      0.00045134385249046563,
+      0.0033424296304594855
+    ],
+    "gana": "B"
+  },
+  "por_grupo": {
+    "conocidas": {
+      "estaciones": 370,
+      "horas": 274226,
+      "f1_a": 0.4763704402505802,
+      "f1_b": 0.47735258108383194
+    },
+    "nuevas": {
+      "estaciones": 99,
+      "horas": 72717,
+      "f1_a": 0.48355604440180044,
+      "f1_b": 0.49506356092931647
+    }
+  },
+  "detalle": {
+    "A": {
+      "oct_exactitud": 0.8996549865539872,
+      "oct_f1_fallas": 0.47683751370568517,
+      "oct_recall_sin_bicicletas": 0.5395128552097429,
+      "oct_precision_sin_bicicletas": 0.4085878253740521,
+      "oct_f1_sin_bicicletas": 0.4650104968509447,
+      "oct_recall_sin_anclajes": 0.5489676718283075,
+      "oct_precision_sin_anclajes": 0.44029850746268656,
+      "oct_f1_sin_anclajes": 0.48866453056042564
+    },
+    "B": {
+      "oct_exactitud": 0.8998942189350988,
+      "oct_f1_fallas": 0.47866493922950093,
+      "oct_recall_sin_bicicletas": 0.5408660351826793,
+      "oct_precision_sin_bicicletas": 0.4100538599640934,
+      "oct_f1_sin_bicicletas": 0.4664624361779723,
+      "oct_recall_sin_anclajes": 0.5530426514534094,
+      "oct_precision_sin_anclajes": 0.44125934756692314,
+      "oct_f1_sin_anclajes": 0.4908674422810296
+    }
+  }
+}

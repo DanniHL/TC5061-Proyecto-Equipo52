@@ -67,6 +67,7 @@ from equipo52_module.config import (
     VERSION_DATOS,
     VIAJES_FILE,
 )
+from equipo52_module.dataset import CODIFICACIONES
 from equipo52_module.features import (
     NOMBRES_CLASES,
     NORMAL,
@@ -131,9 +132,18 @@ REJILLA_BUSQUEDA = {"peso_fallas": [2.0, 3.0, 5.0, 8.0], "learning_rate": [0.05,
 
 
 def cargar_estaciones(ruta: Path, excluidas: list[int]) -> pd.DataFrame:
-    """Lee capacidad y ubicación de la nomenclatura, sin las estaciones excluidas ni las de capacidad 0."""
-    nomenclatura = pd.read_csv(ruta).rename(columns={"id": "estacion_id", "dpcapacity": "capacidad",
-                                                     "latitude": "latitud", "longitude": "longitud"})
+    """Lee capacidad y ubicación de la nomenclatura, sin las estaciones excluidas ni las de capacidad 0.
+
+    Prueba las mismas codificaciones que la ingesta: la nomenclatura de octubre de 2026 llegó en Latin-1.
+    """
+    for codificacion in CODIFICACIONES:
+        try:
+            nomenclatura = pd.read_csv(ruta, encoding=codificacion)
+            break
+        except UnicodeDecodeError:
+            continue
+    nomenclatura = nomenclatura.rename(columns={"id": "estacion_id", "dpcapacity": "capacidad",
+                                                "latitude": "latitud", "longitude": "longitud"})
     nomenclatura = nomenclatura[~nomenclatura["estacion_id"].isin(excluidas) & (nomenclatura["capacidad"] > 0)]
     return nomenclatura.set_index("estacion_id")[["capacidad", "latitud", "longitud"]]
 
