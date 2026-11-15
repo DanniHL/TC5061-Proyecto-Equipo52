@@ -61,9 +61,6 @@ Los datos originales y procesados no se incluyen en el repositorio debido a su t
 
 ## 3. Estructura del proyecto
 
-El repositorio se organiza de la siguiente manera:
-
-```text
 El repositorio está organizado para separar la ingesta y preparación de datos, el desarrollo de los modelos de Machine Learning, la API de inferencia, las pruebas y los elementos necesarios para su despliegue.
 
 ```text
@@ -113,7 +110,9 @@ equipo52_proyecto_mibici/
 ├── reports/
 │   ├── figures/
 │   │   └── ...
-│   └── calidad/
+│   ├── calidad/
+│   │   └── ...
+│   └── monitoreo/
 │       └── ...
 │
 ├── tests/
@@ -150,17 +149,19 @@ equipo52_proyecto_mibici/
 | `docs/` | Documentación técnica del proyecto. |
 | `equipo52_module/` | Código fuente del proyecto. |
 | `equipo52_module/modeling/` | Scripts de preparación, entrenamiento y evaluación de los modelos P1, P2 y P3. |
+| `equipo52_module/monitoring/` | Monitoreo de los modelos: reporte de drift con Evidently, entrenamiento del challenger, A/B testing y promoción en el Model Registry. |
 | `models/` | Modelos entrenados y artefactos necesarios para ejecutar la API; sus archivos se versionan en Git. |
 | `notebooks/` | Análisis exploratorio y experimentación. |
 | `project_Data/` | Copia local de los archivos CSV de MiBici obtenidos mediante el proceso de descarga. |
 | `references/` | Manifiestos y referencias de los datos utilizados. |
 | `reports/figures/` | Gráficas y resultados visuales generados durante el análisis y evaluación de los modelos. |
 | `reports/calidad/` | Reportes de validación y calidad de los datos. |
+| `reports/monitoreo/` | Reportes de drift (HTML y JSON) y resultados del A/B testing de cada pregunta. |
 | `tests/` | Pruebas automatizadas y validaciones del proyecto. |
 | `tests/unitarias/` | Pruebas unitarias de los componentes de ingesta, preparación y entrenamiento. |
 | `tests/reproducibilidad/` | Pruebas para verificar la reproducibilidad de los resultados. |
 | `tests/seguridad/` | Pruebas relacionadas con la gestión de secretos, credenciales y archivos sensibles. |
-| `tests/datos/` | Pruebas de calidad y validación de datos mediante DeepChecks.
+| `tests/datos/` | Pruebas de calidad y validación de datos mediante DeepChecks. |
 
 Los datos y artefactos generados localmente no se incorporan al control de versiones cuando están excluidos mediante `.gitignore`.
 
