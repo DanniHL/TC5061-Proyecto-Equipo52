@@ -1,0 +1,42 @@
+{
+  "modelo": "mibici-equipo52-p3-grupos",
+  "periodo_evaluacion": "2026-10",
+  "version_a": "1",
+  "version_b": "3",
+  "metrica": "silueta",
+  "resultado": {
+    "metrica_a": 0.07013583540889551,
+    "metrica_b": 0.06572180997395076,
+    "diferencia": -0.004414025434944749,
+    "ic_95": [
+      -0.012371226802163855,
+      0.003013515304394156
+    ],
+    "gana": "A"
+  },
+  "por_grupo": {
+    "conocidas": {
+      "estaciones": 468,
+      "silueta_a": 0.07048012387935342,
+      "silueta_b": 0.06604510790642598
+    }
+  },
+  "detalle": {
+    "estaciones_octubre": 469,
+    "estaciones_conocidas": 468,
+    "estaciones_nuevas": 1,
+    "grupos_a": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "grupos_b": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "estaciones_que_cambian_de_grupo": 349
+  }
+}

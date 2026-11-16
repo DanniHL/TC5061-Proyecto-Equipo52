@@ -76,6 +76,7 @@ from equipo52_module.config import (
     VERSION_DATOS,
     VIAJES_FILE,
 )
+from equipo52_module.dataset import CODIFICACIONES
 from equipo52_module.features import (
     SEGUNDOS_REDONDO_CORTO,
     construir_matriz_p3,
@@ -127,8 +128,17 @@ TINTA = "#52514e"
 
 
 def cargar_estaciones(ruta: Path, excluidas: list[int]) -> pd.DataFrame:
-    """Lee capacidad, ubicación y municipio de la nomenclatura, sin excluidas ni capacidad 0."""
-    nomenclatura = pd.read_csv(ruta).rename(columns={"id": "estacion_id", "dpcapacity": "capacidad",
+    """Lee capacidad, ubicación y municipio de la nomenclatura, sin excluidas ni capacidad 0.
+
+    Prueba las mismas codificaciones que la ingesta: la nomenclatura de octubre de 2026 llegó en Latin-1.
+    """
+    for codificacion in CODIFICACIONES:
+        try:
+            nomenclatura = pd.read_csv(ruta, encoding=codificacion)
+            break
+        except UnicodeDecodeError:
+            continue
+    nomenclatura = nomenclatura.rename(columns={"id": "estacion_id", "dpcapacity": "capacidad",
                                                      "latitude": "latitud", "longitude": "longitud"})
     nomenclatura = nomenclatura[~nomenclatura["estacion_id"].isin(excluidas) & (nomenclatura["capacidad"] > 0)]
     nomenclatura["municipio"] = nomenclatura["name"].str.extract(r"\(([A-Z]+)-\d+\)")[0].fillna("OTRO")
