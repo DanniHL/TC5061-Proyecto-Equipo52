@@ -1168,3 +1168,59 @@ docker stop mibici-api && docker rm mibici-api
 ```
 
 Los mismos comandos funcionan con Podman (`podman build`, `podman run`), porque el `Dockerfile` sigue el estándar OCI.
+
+
+## **14 Monitoreo y actualización de modelos**
+
+El proyecto incorpora actividades de monitoreo para identificar cambios en los datos, evaluar nuevas versiones de los modelos y mantener actualizado el registro de MLflow.
+
+El proceso contempla tres actividades principales:
+
+1. **Detección de drift:** comparación entre los datos de referencia utilizados durante el desarrollo del modelo y los datos recientes.
+2. **Entrenamiento de challengers:** generación de nuevas versiones de los modelos utilizando información actualizada.
+3. **Evaluación y promoción:** comparación de las versiones disponibles y actualización del alias `champion` cuando se cumplen los criterios de selección establecidos.
+
+### **14.1 Detección de drift**
+
+Se utiliza Evidently para comparar las distribuciones de las variables de referencia y los datos actuales. Los reportes permiten identificar cambios en las características de entrada que podrían afectar el comportamiento de los modelos.
+
+Para P1, se construyeron dos conjuntos de datos:
+
+- Referencia: información histórica hasta el 30 de junio de 2026.
+- Datos actuales: información correspondiente a octubre de 2026.
+
+El análisis se realizó sobre las ocho variables utilizadas por el modelo. Se identificó drift en cinco de ellas: `Viajes_dia_anterior`, `Viajes_hace_7_dias`, `Promedio_7_dias`, `Mes_sin` y `Mes_cos`.
+
+El reporte general identificó drift en el conjunto de datos, con cinco de ocho variables afectadas. Los cambios en las variables mensuales también reflejan que octubre tiene valores cíclicos constantes para el mes, por lo que deben interpretarse considerando la periodicidad de los datos.
+
+Los reportes se generan en formato HTML y JSON, acompañados de un resumen por variable en CSV.
+
+### **14.2 Entrenamiento de challengers**
+
+Cuando se identifican cambios relevantes en los datos, se pueden entrenar nuevas versiones de los modelos para evaluar si ofrecen un mejor desempeño.
+
+Para P1, el challenger se entrenó con información hasta septiembre de 2026 y se registró como versión 2 del modelo `mibici-equipo52-p1-demanda`.
+
+En P2, el flujo de monitoreo y evaluación utiliza los scripts específicos de esa pregunta, conservando el modelo seleccionado y la siguiente alternativa dentro del Model Registry.
+
+En P3, la selección de modelos considera los resultados de los experimentos de agrupamiento, la calidad de los grupos y los criterios de estabilidad definidos para la red de estaciones.
+
+### **14.3 Pruebas A/B**
+
+La evaluación A/B permite comparar dos versiones de un modelo utilizando los mismos datos de evaluación.
+
+La regla de decisión establece que el challenger gana cuando el intervalo completo de la diferencia entre sus resultados y los del champion favorece a la nueva versión. Si el intervalo incluye cero, se conserva el modelo anterior.
+
+Este procedimiento permite evitar que una diferencia pequeña en las métricas sea suficiente, por sí sola, para justificar una actualización.
+
+### **14.4 Promoción y conservación de versiones**
+
+Cuando una nueva versión cumple los criterios de selección, se actualizan los alias del Model Registry:
+
+- `champion`: identifica la versión seleccionada para su utilización.
+- `anterior`: conserva la versión que fue sustituida.
+- `challenger`: identifica una versión candidata mientras se encuentra en evaluación.
+
+La promoción no elimina versiones del registro. También se agregan etiquetas que documentan el motivo del cambio y la relación entre las versiones.
+
+Este mecanismo permite mantener la trazabilidad de los modelos y facilita la reversión a una versión previa cuando sea necesario.
