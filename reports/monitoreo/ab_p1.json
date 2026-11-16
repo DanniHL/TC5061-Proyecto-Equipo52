@@ -1,0 +1,31 @@
+{
+    "modelo": "mibici-equipo52-p1-demanda",
+    "champion_version": "1",
+    "challenger_version": "2",
+    "periodo_evaluacion": {
+        "inicio": "2026-10-01 00:00:00",
+        "fin": "2026-10-31 00:00:00"
+    },
+    "registros_evaluacion": 14264,
+    "mae": {
+        "metrica_a": 8.197081063298247,
+        "metrica_b": 8.190526764284183,
+        "diferencia": -0.0065542990140645685,
+        "ic_95": [
+            -0.008124394542344815,
+            -0.004810993380368323
+        ],
+        "gana": "B"
+    },
+    "rmse": {
+        "metrica_a": 14.859293548715168,
+        "metrica_b": 14.852846090557252,
+        "diferencia": -0.006447458157916586,
+        "ic_95": [
+            -0.009800267583161526,
+            -0.002666656002112689
+        ],
+        "gana": "B"
+    },
+    "criterio": "El challenger gana únicamente si el IC 95% de B-A queda completamente por debajo de cero."
+}
