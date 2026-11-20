@@ -1,0 +1,49 @@
+# Orquestación del sistema MiBici (Equipo 52).
+# Levanta la API de predicción y el servidor de MLflow con: docker compose up -d --build
+
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.17.2          # misma versión que creó mlflow.db
+    container_name: mibici-mlflow
+    command: >
+      mlflow server
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --default-artifact-root ${PWD}/mlruns
+      --host 0.0.0.0 --port 5000
+      --workers 1
+    volumes:
+      - ./mlflow.db:/mlflow/mlflow.db             # metadatos: experimentos, corridas, Registry
+      - ./mlruns:${PWD}/mlruns                    # artefactos, en la misma ruta que guardó MLflow
+    ports:
+      - "${MLFLOW_PORT:-5000}:5000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1g }
+    restart: unless-stopped
+    networks: [mibici-net]
+
+  api:
+    build: .
+    image: mibici-equipo52-api
+    container_name: mibici-api
+    env_file:
+      - path: .env
+        required: false                           # en GitHub Actions no existe .env
+    ports:
+      - "${API_PORT:-8000}:8000"
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 2g }
+    restart: unless-stopped
+    networks: [mibici-net]
+
+networks:
+  mibici-net:
+    name: mibici-net
+    
