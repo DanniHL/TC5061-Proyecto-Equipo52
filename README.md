@@ -131,6 +131,7 @@ equipo52_proyecto_mibici/
 ├── Dockerfile
 ├── Makefile
 ├── README.md
+├── docker-compose.yml
 ├── pyproject.toml
 ├── requirements-api.txt
 └── requirements.txt
@@ -1224,3 +1225,31 @@ Cuando una nueva versión cumple los criterios de selección, se actualizan los 
 La promoción no elimina versiones del registro. También se agregan etiquetas que documentan el motivo del cambio y la relación entre las versiones.
 
 Este mecanismo permite mantener la trazabilidad de los modelos y facilita la reversión a una versión previa cuando sea necesario.
+
+## 15. Operación del sistema con Docker Compose
+
+El archivo `docker-compose.yml` levanta el sistema completo con un solo comando: la API de predicción (sección 13) y el servidor de MLflow (sección 10), conectados por la red privada `mibici-net`.
+
+| Servicio | Puerto | Datos | Límites |
+|---|---|---|---|
+| `api` | 8000 | Modelos P1, P2 y P3 dentro de la imagen | 2 CPU, 2 GiB |
+| `mlflow` (3.17.2) | 5000 | Volúmenes `mlflow.db` y `mlruns/` | 1 CPU, 1 GiB |
+
+### 15.1 Levantar y detener el sistema
+
+Requisito: Docker Desktop abierto. Si hay un `mlflow server` local en ejecución, se debe detener antes, porque usa el puerto 5000.
+
+```bash
+docker compose up -d --build   # construye la imagen de la API y levanta ambos servicios
+docker compose ps              # ambos deben mostrar (healthy)
+docker compose logs mlflow     # bitácora de un servicio
+docker compose down            # detiene y elimina los contenedores; los datos se conservan
+```
+
+La API queda en `http://localhost:8000/docs` y MLflow en `http://localhost:5000`. Si un puerto está ocupado, se puede cambiar sin editar el archivo: `API_PORT=8001 MLFLOW_PORT=5001 docker compose up -d`.
+
+### 15.2 Consideraciones
+
+- La API no depende de MLflow para predecir: si MLflow se detiene, la API sigue operando.
+- `mlflow.db` y `mlruns/` no se versionan en Git; cada integrante usa los suyos. `mlruns/` se monta en la misma ruta del host porque `mlflow.db` guarda rutas absolutas.
+- MLflow corre con un solo worker: con cuatro workers rebasaba el límite de 1 GiB y se reiniciaba.
