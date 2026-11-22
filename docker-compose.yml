@@ -8,12 +8,12 @@ services:
     command: >
       mlflow server
       --backend-store-uri sqlite:////mlflow/mlflow.db
-      --default-artifact-root ${PWD}/mlruns
+      --default-artifact-root /mlflow/mlruns
       --host 0.0.0.0 --port 5000
       --workers 1
     volumes:
       - ./mlflow.db:/mlflow/mlflow.db             # metadatos: experimentos, corridas, Registry
-      - ./mlruns:${PWD}/mlruns                    # artefactos, en la misma ruta que guardó MLflow
+      - ./mlruns:/mlflow/mlruns                   # artefactos, ruta fija dentro del contenedor
     ports:
       - "${MLFLOW_PORT:-5000}:5000"
     healthcheck:
