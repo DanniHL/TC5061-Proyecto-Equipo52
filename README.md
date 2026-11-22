@@ -1252,5 +1252,5 @@ La API queda en `http://localhost:8000/docs` y MLflow en `http://localhost:5000`
 ### 15.2 Consideraciones
 
 - La API no depende de MLflow para predecir: si MLflow se detiene, la API sigue operando.
-- `mlflow.db` y `mlruns/` no se versionan en Git; cada integrante usa los suyos. `mlruns/` se monta en la misma ruta del host porque `mlflow.db` guarda rutas absolutas.
+- `mlflow.db` y `mlruns/` no se versionan en Git; cada integrante usa los suyos. `mlruns/` se monta en la ruta fija `/mlflow/mlruns` del contenedor, igual en macOS, Windows y Linux. Las corridas registradas antes con rutas absolutas de otro equipo conservan métricas, parámetros y el Model Registry, pero sus artefactos no se muestran en la interfaz.
 - MLflow corre con un solo worker: con cuatro workers rebasaba el límite de 1 GiB y se reiniciaba.
