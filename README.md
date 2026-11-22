@@ -1195,6 +1195,8 @@ El reporte general identificó drift en el conjunto de datos, con cinco de ocho 
 
 Para P2, la referencia es el periodo de entrenamiento del champion (diciembre de 2014 a marzo de 2026) y los datos actuales corresponden a octubre de 2026. Se identificó drift en seis de trece variables, sin drift a nivel del conjunto: longitud (0.237), capacidad de la estación (0.180) y las salidas y llegadas de 1 y 3 horas (0.148 a 0.179). La proporción de fallas y las variables de calendario no cambiaron, lo que indica un cambio en las entradas sin cambio en la variable objetivo (covariate shift).
 
+Para P3, la referencia es la matriz estación × característica con la que se entrenó el champion (toda la historia hasta el 30 de septiembre de 2026) y los datos actuales son la misma matriz calculada solo con los viajes de octubre de 2026. Se excluyeron del reporte las tres características de evolución histórica (`meses_activa`, `share_viajes_ultimos_12m` y `crecimiento_vs_esperado`), porque sobre un solo mes son constantes por construcción y marcarían drift artificial. Se identificó drift en 29 de las 42 características reportadas (69 %), por encima del umbral del 50 % que declara drift en el conjunto: las proporciones por día de la semana y buena parte de las horarias, los volúmenes mensuales, el número de destinos y la duración mediana. Es decir, el perfil de uso que presentaron las estaciones durante octubre difiere de la historia completa con la que se formaron los grupos.
+
 Los reportes se generan en formato HTML y JSON, acompañados de un resumen por variable en CSV.
 
 ### 14.2 Entrenamiento de challengers
@@ -1205,7 +1207,7 @@ Para P1, el challenger se entrenó con información hasta septiembre de 2026 y s
 
 En P2, el challenger es la receta del champion reentrenada hasta septiembre de 2026 (versión 3); ganó el A/B en F1 de fallas y pasó a champion, con la v1 como anterior.
 
-En P3, la selección de modelos considera los resultados de los experimentos de agrupamiento, la calidad de los grupos y los criterios de estabilidad definidos para la red de estaciones.
+En P3, el challenger es la misma receta del champion (K-Means con k = 4 sobre las 42 características estandarizadas) reentrenada solo con el régimen post-COVID: los viajes del 9 de mayo de 2023 al 30 de septiembre de 2026. Se registró como versión 3 de `mibici-equipo52-p3-grupos` y se evaluó contra el champion (versión 1) con la matriz de estaciones de octubre de 2026, que ninguna de las dos vio al entrenar. Como no hay etiqueta real, la métrica fue la silueta de la partición que cada versión induce sobre octubre: el champion obtuvo 0.0701 y el challenger 0.0657, con un intervalo de confianza del 95 % para la diferencia de −0.0124 a 0.0030, que incluye cero. Aunque el challenger reasignaría de grupo a 349 de las 468 estaciones conocidas, la diferencia no es concluyente y se conservó el champion.
 
 ### 14.3 Pruebas A/B
 
@@ -1254,3 +1256,40 @@ La API queda en `http://localhost:8000/docs` y MLflow en `http://localhost:5000`
 - La API no depende de MLflow para predecir: si MLflow se detiene, la API sigue operando.
 - `mlflow.db` y `mlruns/` no se versionan en Git; cada integrante usa los suyos. `mlruns/` se monta en la ruta fija `/mlflow/mlruns` del contenedor, igual en macOS, Windows y Linux. Las corridas registradas antes con rutas absolutas de otro equipo conservan métricas, parámetros y el Model Registry, pero sus artefactos no se muestran en la interfaz.
 - MLflow corre con un solo worker: con cuatro workers rebasaba el límite de 1 GiB y se reiniciaba.
+
+## 16. Integración continua y pruebas de carga
+
+### 16.1 Pipeline de CI/CD
+
+El workflow `.github/workflows/ci-cd.yml` corre en cada push y en cada pull request a `main`, en tres etapas encadenadas:
+
+1. **Pruebas:** las cuatro suites de `tests/` (unitarias, reproducibilidad, seguridad y datos) corren en paralelo en Python 3.12, con caché de pip entre corridas. Las pruebas de `tests/datos` salen en *skipped* porque DeepChecks necesita el entorno aparte `.venv-calidad` y los CSV reales, que no se versionan.
+2. **Imagen:** se construye la imagen de la API con Buildx y caché de capas (`type=gha`), y se verifica que el contenedor responde en `/health`. En los push a `main` la imagen también se publica en GHCR (`ghcr.io/dannihl/mibici-equipo52-api`).
+3. **Compose:** se levanta el sistema completo con `docker compose up -d --build`, se espera a que ambos servicios estén *healthy* y se envía una predicción real a `/p1/predict`.
+
+Si alguna etapa falla, las siguientes no se ejecutan y el pull request muestra la falla antes de integrarse.
+
+### 16.2 Pruebas de carga con Locust
+
+El escenario de `locustfile.py` reparte las peticiones entre los tres endpoints de predicción, con un tiempo de espera de 1 a 2 segundos entre tareas. Con el sistema levantado (sección 15):
+
+```bash
+locust -f locustfile.py --host http://localhost:8000 --headless \
+  -u 100 -r 10 -t 3m \
+  --html reports/locust/locust_100_users.html \
+  --csv reports/locust/locust_100_users
+```
+
+Sin `--headless`, Locust abre su interfaz web en `http://localhost:8089` para controlar la prueba de forma interactiva. Los reportes HTML quedan en `reports/locust/` y se versionan como evidencia; los CSV de métricas se regeneran en cada corrida.
+
+### 16.3 Monitoreo de recursos
+
+Durante la prueba de carga, el consumo de CPU y memoria de los contenedores se observa con `docker stats`:
+
+```bash
+docker stats mibici-api mibici-mlflow                # vista en vivo
+docker stats --no-stream --format \
+  "{{.Name}},{{.CPUPerc}},{{.MemUsage}},{{.MemPerc}}" mibici-api mibici-mlflow
+```
+
+`reports/locust/monitorear_recursos.ps1` registra esas métricas en un CSV cada dos segundos (PowerShell); en macOS y Linux el mismo muestreo se obtiene con `watch` o un ciclo `while` sobre el segundo comando.
