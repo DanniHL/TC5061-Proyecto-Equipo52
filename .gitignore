@@ -224,3 +224,7 @@ credentials*.json
 
 # Tablas de resultados de Evidently: los resultados se versionan en el HTML y el JSON
 reports/monitoreo/*.csv
+
+# Métricas crudas de Locust y de docker stats: se regeneran en cada corrida;
+# la evidencia que se versiona es el reporte HTML
+reports/locust/*.csv
