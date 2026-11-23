@@ -67,6 +67,8 @@ jobs:
       # cache-from/to type=gha guarda las capas en el caché de Actions: las
       # corridas siguientes solo reconstruyen lo que cambió. En los PR la imagen
       # se carga al daemon (load) para probarla; en push a main se publica en GHCR.
+      # Todas las etiquetas llevan prefijo de registro: si alguna quedara sin él,
+      # el push intentaría subirla a Docker Hub y fallaría por falta de login.
       - name: Construir la imagen
         uses: docker/build-push-action@v6
         with:
@@ -74,7 +76,6 @@ jobs:
           load: true
           push: ${{ github.event_name == 'push' }}
           tags: |
-            mibici-equipo52-api:ci
             ghcr.io/dannihl/mibici-equipo52-api:latest
             ghcr.io/dannihl/mibici-equipo52-api:${{ github.sha }}
           cache-from: type=gha
@@ -82,7 +83,7 @@ jobs:
 
       - name: Probar la imagen construida
         run: |
-          docker run -d --name api-ci -p 8000:8000 mibici-equipo52-api:ci
+          docker run -d --name api-ci -p 8000:8000 ghcr.io/dannihl/mibici-equipo52-api:${{ github.sha }}
           for i in $(seq 1 24); do
             if curl -fsS http://localhost:8000/health; then exit 0; fi
             sleep 5
