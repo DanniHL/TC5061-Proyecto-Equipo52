@@ -85,6 +85,10 @@ equipo52_proyecto_mibici/
 │   └── ...
 │
 ├── docs/
+│   ├── evidencias/
+│   ├── model_cards/
+│   │   ├── README.md
+│   │   └── p2_riesgo.md
 │   └── ...
 │
 ├── equipo52_module/
@@ -148,6 +152,8 @@ equipo52_proyecto_mibici/
 | `api/services/` | Servicios para cargar los modelos y generar predicciones. |
 | `data/` | Datos originales y procesados utilizados durante el desarrollo del proyecto. |
 | `docs/` | Documentación técnica del proyecto. |
+| `docs/evidencias/` | Capturas de pantalla que documentan cada etapa del proyecto. |
+| `docs/model_cards/` | Model Cards de P1, P2 y P3 y un índice con lo común a los tres modelos (sección 18). |
 | `equipo52_module/` | Código fuente del proyecto. |
 | `equipo52_module/modeling/` | Scripts de preparación, entrenamiento y evaluación de los modelos P1, P2 y P3. |
 | `equipo52_module/monitoring/` | Monitoreo de los modelos: reporte de drift con Evidently, entrenamiento del challenger, A/B testing y promoción en el Model Registry. |
