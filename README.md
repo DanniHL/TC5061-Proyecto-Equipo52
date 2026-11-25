@@ -85,6 +85,10 @@ equipo52_proyecto_mibici/
 │   └── ...
 │
 ├── docs/
+│   ├── evidencias/
+│   ├── model_cards/
+│   │   ├── README.md
+│   │   └── p2_riesgo.md
 │   └── ...
 │
 ├── equipo52_module/
@@ -148,6 +152,8 @@ equipo52_proyecto_mibici/
 | `api/services/` | Servicios para cargar los modelos y generar predicciones. |
 | `data/` | Datos originales y procesados utilizados durante el desarrollo del proyecto. |
 | `docs/` | Documentación técnica del proyecto. |
+| `docs/evidencias/` | Capturas de pantalla que documentan cada etapa del proyecto. |
+| `docs/model_cards/` | Model Cards de P1, P2 y P3 y un índice con lo común a los tres modelos (sección 18). |
 | `equipo52_module/` | Código fuente del proyecto. |
 | `equipo52_module/modeling/` | Scripts de preparación, entrenamiento y evaluación de los modelos P1, P2 y P3. |
 | `equipo52_module/monitoring/` | Monitoreo de los modelos: reporte de drift con Evidently, entrenamiento del challenger, A/B testing y promoción en el Model Registry. |
@@ -479,9 +485,15 @@ El modelo de P2 se administra mediante el registro de modelos de MLflow, utiliza
 mibici-equipo52-p2-riesgo
 ```
 
-La selección del modelo considera la comparación entre los experimentos realizados y el desempeño obtenido en las métricas definidas para esta pregunta.
+Estado actual del registro:
 
-Los detalles de la versión seleccionada, su corrida de origen y sus métricas deben consultarse directamente en el registro de MLflow.
+| Versión | Alias | Corrida de origen | Datos de entrenamiento | F1 de fallas |
+|---|---|---|---|---|
+| v3 | `champion` (en producción) | `d444d7cc1e624e439c735525bbb86fd6` | 2014-12 a 2026-09 | 0.4787 (octubre de 2026) |
+| v2 | — | `be8172dd139d45d2ba201ee23c9eeb1c` | post-COVID, 2023-05 a 2026-03 | 0.444 (prueba) |
+| v1 | `anterior` | `d40ea0ba5c6247a79477c804de672cb2` | 2014-12 a 2026-03 | 0.449 (prueba) |
+
+La v1 fue el champion inicial; la v3 la sustituyó el 11 de noviembre de 2026 al ganar el A/B de octubre (sección 14). Cada versión guarda en el registro etiquetas con su corrida, periodo, versión de datos y motivo de promoción. El detalle completo está en el [Model Card de P2](docs/model_cards/p2_riesgo.md).
 
 ## 9. Pregunta P3: Agrupación de estaciones
 
@@ -672,17 +684,11 @@ modelo = mlflow.sklearn.load_model(
 )
 ```
 
-Para la pregunta P2
-El modelo se registró en MLflow Model Registry con el nombre
+Para la pregunta P2, el modelo se registró en MLflow Model Registry con el nombre `mibici-equipo52-p2-riesgo`. Hoy la versión 3 tiene el alias `champion` y la versión 1 el alias `anterior`; la tabla de versiones y su linaje están en la sección 8.5.
 
-```bash
-mibici-equipo52-p2-riesgo.
-```
+El alias permite cargar la versión en producción sin fijar un número de versión en el código:
 
-La versión 1 se identificó con el alias champion, que permite recuperar la versión seleccionada sin depender de un número de versión fijo en el código.
-L
-a versión seleccionada se identifica mediante el alias champion, de modo que pueda cargarse sin depender de un número de versión específico:
-```bash
+```python
 import mlflow.sklearn
 
 modelo = mlflow.sklearn.load_model(
@@ -1053,9 +1059,9 @@ curl -s -X POST http://localhost:8000/p2/predict \
   "clase": 1,
   "etiqueta": "sin_bicicletas",
   "probabilidades": {
-    "normal": 0.1888,
-    "sin_bicicletas": 0.8014,
-    "sin_anclajes": 0.0098
+    "normal": 0.1712,
+    "sin_bicicletas": 0.8227,
+    "sin_anclajes": 0.0061
   }
 }
 ```
@@ -1293,3 +1299,43 @@ docker stats --no-stream --format \
 ```
 
 `reports/locust/monitorear_recursos.ps1` registra esas métricas en un CSV cada dos segundos (PowerShell); en macOS y Linux el mismo muestreo se obtiene con `watch` o un ciclo `while` sobre el segundo comando.
+
+## 17. Análisis FinOps
+
+El análisis se basa en el consumo de recursos medido con `docker stats` durante las pruebas de carga (sección 16): qué recursos usa cada servicio, cuáles sobran y dónde conviene ajustar.
+
+### 17.1 Consumo de recursos
+
+| Usuarios | Contenedor | CPU promedio | Memoria promedio |
+|---:|---|---:|---:|
+| 10 | API | 12.42 % | 11.33 % |
+| 50 | API | 91.92 % | 11.40 % |
+| 100 | API | 137.91 % | 11.63 % |
+| 10 a 100 | MLflow | 1.08 % a 1.55 % | 98.2 % |
+
+- La **API** está limitada por CPU: con 100 usuarios usa más de una CPU completa, mientras que su memoria se mantiene en unos 235 MB de los 2 GiB asignados.
+- **MLflow** casi no usa CPU, pero ocupa cerca del 98 % de su límite de 1 GiB.
+
+### 17.2 Optimizaciones propuestas
+
+1. **No desplegar MLflow junto a la API.** La API no depende de MLflow para predecir (sección 15.2) y MLflow casi no usó CPU durante las pruebas; puede encenderse solo cuando se registran o revisan modelos.
+2. **Ajustar los recursos de la API.** Su memoria está sobrada y la CPU es el límite: conviene asignar menos memoria y, si crece la demanda, más CPU.
+3. **Más procesos de inferencia.** La API corre con un solo worker; dos workers o dos réplicas repartirían la carga de P2, el endpoint más lento (mediana de 2.5 s con 100 usuarios).
+4. **Imagen más ligera.** La imagen pesa 1.32 GB, en buena parte por MLflow, que solo se usa para cargar los modelos; servirlos directamente con `skops` reduciría su tamaño y el tiempo de despliegue.
+
+## 18. Gobernanza del modelo
+
+### 18.1 Model Cards
+
+Cada modelo tiene su Model Card con las mismas diez secciones: detalles y versión, uso previsto, datos, variables, métricas, análisis por grupo, limitaciones, ética, monitoreo e historial de versiones. El índice está en [docs/model_cards/README.md](docs/model_cards/README.md), junto con lo que es común a los tres modelos.
+
+### 18.2 Prácticas del proyecto
+
+| Práctica | Cómo se aplica | Sección |
+|---|---|---|
+| Trazabilidad | Cada corrida registra parámetros, métricas, versión y huella SHA-256 de los datos, y el commit | 10.1 |
+| Promoción con evidencia | Alias `champion`, `anterior` y `challenger`; el challenger se promueve solo si gana el A/B con una regla fijada antes | 14 |
+| Reversión | La versión sustituida conserva el alias `anterior` y puede volver a producción | 14.4 |
+| Cambios revisados | `main` está protegida: todo cambio entra por pull request, con la revisión de otro integrante y el CI en verde | 12 y 16.1 |
+| Privacidad | La ingesta no lee `Usuario_Id`, `Genero` ni `Año_de_nacimiento`, los datos no se guardan en Git y una prueba automática lo verifica | 11.6 |
+| Seguridad | Bandit sin hallazgos de severidad media o alta, pip-audit sin vulnerabilidades conocidas y 21 pruebas de seguridad en `tests/seguridad/` | 11.6 |
