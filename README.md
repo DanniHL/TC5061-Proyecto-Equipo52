@@ -1,5 +1,7 @@
 # TC5061 · Proyecto MiBici · Equipo 52
 
+[![CI/CD](https://github.com/DanniHL/TC5061-Proyecto-Equipo52/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/DanniHL/TC5061-Proyecto-Equipo52/actions/workflows/ci-cd.yml)
+
 Proyecto de Machine Learning Operations (MLOps) para analizar los viajes del sistema público de bicicletas **MiBici**, del Área Metropolitana de Guadalajara, y desarrollar modelos de aprendizaje automático para responder tres preguntas de negocio.
 
 El proyecto integra un flujo de trabajo que contempla la obtención y preparación de datos, el desarrollo de modelos, la ejecución de experimentos, la evaluación de resultados y el registro de modelos mediante MLflow. También incorpora pruebas automatizadas para verificar el funcionamiento de los componentes del proyecto.
@@ -594,9 +596,15 @@ El modelo de P3 se administra mediante el registro:
 mibici-equipo52-p3-grupos
 ```
 
-La selección del modelo considera los resultados de los experimentos realizados y la interpretación de los grupos obtenidos.
+Estado actual del registro:
 
-La versión definitiva, la corrida de origen y las métricas deben consultarse en el registro de MLflow.
+| Versión | Alias | Corrida de origen | Datos de entrenamiento | Silueta en el espacio de uso |
+|---|---|---|---|---|
+| v1 | `champion` (en producción) | `f1721278a8f44272ac05bae27b51fe1b` | 2014-12 a 2026-09 | 0.105 (red completa), 0.131 (consolidadas) |
+| v2 | — | `216c28c7b78d4d5db65011850b9295a6` | 2014-12 a 2026-09 | 0.151 (red completa) |
+| v3 | `challenger` | `b1d83fb4adb344c28da043764e45b4fe` | post-COVID, 2023-05 a 2026-09 | 0.066 (octubre de 2026) |
+
+La v1 fue el champion inicial (25 de octubre de 2026); la v3 se registró como challenger de la semana 9 y se evaluó en el A/B de octubre, pero no desplazó al champion porque el intervalo de confianza de la diferencia incluye cero (sección 14), así que producción sigue siendo la v1. Cada versión guarda en el registro etiquetas con su corrida, periodo, versión de datos y motivo. El detalle completo está en el [Model Card de P3](docs/model_cards/p3_grupos.md).
 
 ## 10. Seguimiento de experimentos con MLflow
 
@@ -693,6 +701,16 @@ import mlflow.sklearn
 
 modelo = mlflow.sklearn.load_model(
     "models:/mibici-equipo52-p2-riesgo@champion"
+)
+```
+
+Para la pregunta P3, el modelo se registró en MLflow Model Registry con el nombre `mibici-equipo52-p3-grupos`. Hoy la versión 1 tiene el alias `champion` y la versión 3 el alias `challenger`: la v3 se reentrenó con datos post-COVID para el ciclo de monitoreo, pero no ganó el A/B de octubre de 2026, por lo que producción sigue en la v1. La tabla de versiones y su linaje están en la sección 9.5.
+
+```python
+import mlflow
+
+modelo = mlflow.pyfunc.load_model(
+    "models:/mibici-equipo52-p3-grupos@champion"
 )
 ```
 

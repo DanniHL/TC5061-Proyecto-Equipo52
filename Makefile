@@ -101,6 +101,20 @@ seguridad:
 verificar: entorno-calidad test seguridad
 
 
+## Corre el ciclo de monitoreo de los tres modelos (drift -> challenger -> A/B ->
+## promocion) o el de uno solo con: make monitoreo-p3   (o monitoreo-p1 / monitoreo-p2).
+## Requiere el servidor de MLflow encendido y los CSV de octubre en data/raw;
+## la promocion solo mueve los alias si el challenger gano el A/B.
+.PHONY: monitoreo monitoreo-p1 monitoreo-p2 monitoreo-p3
+monitoreo: monitoreo-p1 monitoreo-p2 monitoreo-p3
+
+monitoreo-p1 monitoreo-p2 monitoreo-p3: monitoreo-%:
+	$(PYTHON_INTERPRETER) -m equipo52_module.monitoring.drift_$*
+	$(PYTHON_INTERPRETER) -m equipo52_module.monitoring.challenger_$*
+	$(PYTHON_INTERPRETER) -m equipo52_module.monitoring.ab_$*
+	$(PYTHON_INTERPRETER) -m equipo52_module.monitoring.promover_$*
+
+
 #################################################################################
 # Self Documenting Commands                                                     #
 #################################################################################
