@@ -1,5 +1,5 @@
 artifact_path: "file:C:/Users/ingda/Documents/5_Tec Maestr\xEDa IA/7_MLOps/Semana\
-  \ 5/equipo52_proyecto_mibici/mlruns/3/models/m-b29e2c3dbae14ae7850557ce9245fc5e/artifacts"
+  \ 5/equipo52_proyecto_mibici/mlruns/3/models/m-ad3f1d531cd4462792a3ffb337e3e36d/artifacts"
 flavors:
   python_function:
     env:
@@ -16,12 +16,12 @@ flavors:
     sklearn_version: 1.9.1
     skops_trusted_types: null
 is_signature_from_type_hint: false
-mlflow_version: 3.17.0
-model_id: m-b29e2c3dbae14ae7850557ce9245fc5e
-model_size_bytes: 24094
-model_uuid: m-b29e2c3dbae14ae7850557ce9245fc5e
+mlflow_version: 3.17.2
+model_id: m-ad3f1d531cd4462792a3ffb337e3e36d
+model_size_bytes: 24735
+model_uuid: m-ad3f1d531cd4462792a3ffb337e3e36d
 prompts: null
-run_id: db35a9caee2b4d25bc6ea3faee674842
+run_id: 418cf6c4e2be44d285f362162a19c459
 saved_input_example_info:
   artifact_path: input_example.json
   pandas_orient: split
@@ -38,4 +38,4 @@ signature:
   outputs: '[{"type": "tensor", "tensor-spec": {"dtype": "float64", "shape": [-1]}}]'
   params: null
 type_hint_from_example: false
-utc_time_created: '2026-10-25 23:52:18.588381'
+utc_time_created: '2026-11-15 04:05:50.713148'
