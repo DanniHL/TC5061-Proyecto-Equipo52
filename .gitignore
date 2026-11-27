@@ -228,3 +228,5 @@ reports/monitoreo/*.csv
 # Métricas crudas de Locust y de docker stats: se regeneran en cada corrida;
 # la evidencia que se versiona es el reporte HTML
 reports/locust/*.csv
+# Archivos temporales de Office (locks ~$): nunca se versionan
+~$*
